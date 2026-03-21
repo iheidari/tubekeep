@@ -45,6 +45,18 @@ function App() {
     setIsReady(true)
   }, [])
 
+  // Check for redownload URL
+  useEffect(() => {
+    const redownloadUrl = localStorage.getItem('redownloadUrl')
+    if (redownloadUrl) {
+      console.log('🔄 Redownload requested for:', redownloadUrl)
+      // Clear the stored URL
+      localStorage.removeItem('redownloadUrl')
+      // Auto-fetch the video info
+      fetchVideoInfo(redownloadUrl)
+    }
+  }, [isReady])
+
   // Save to localStorage whenever history changes
   useEffect(() => {
     if (!isReady) return

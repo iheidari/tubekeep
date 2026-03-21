@@ -8,6 +8,7 @@ import {
   ExternalLink,
   FileAudio,
   FileVideo,
+  RefreshCw,
 } from "lucide-react";
 
 function DownloadHistory({ downloads, apiUrl, onDelete, onPlay }) {
@@ -68,7 +69,17 @@ function DownloadHistory({ downloads, apiUrl, onDelete, onPlay }) {
           const isAudio = fileType === "audio";
           const downloadUrl = `${apiUrl}/api/files/${download.downloadId}/${encodeURIComponent(download.filename)}?action=download`;
 
-          return (
+  const handleRedownload = (download) => {
+    // Navigate to main download page with the URL pre-filled
+    if (download.url) {
+      // Store the URL in localStorage so the main component can pick it up
+      localStorage.setItem('redownloadUrl', download.url);
+      // Refresh the page to trigger a new download flow
+      window.location.reload();
+    }
+  };
+
+  return (
             <div
               key={download.downloadId}
               className={`history-item ${isExpired ? "expired" : ""}`}
@@ -165,7 +176,7 @@ function DownloadHistory({ downloads, apiUrl, onDelete, onPlay }) {
                 </p>
                 <p
                   style={{
-                    color: hoursLeft < 4 ? "#dc2626" : "#667eea",
+                    color: isExpired ? "#dc2626" : hoursLeft < 4 ? "#f59e0b" : "#667eea",
                     fontSize: "0.8rem",
                     marginTop: 2,
                     display: "flex",
@@ -174,12 +185,33 @@ function DownloadHistory({ downloads, apiUrl, onDelete, onPlay }) {
                   }}
                 >
                   <Clock size={12} />
-                  {isExpired ? "Expired" : `${hoursLeft}h remaining`}
+                  {isExpired ? "File expired - server cleaned up" : `${hoursLeft}h remaining`}
                 </p>
+                {/* Original URL link - always visible */}
+                {download.url && (
+                  <a
+                    href={download.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      color: "#667eea",
+                      fontSize: "0.8rem",
+                      marginTop: 4,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      textDecoration: "none",
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <ExternalLink size={12} />
+                    Original Video
+                  </a>
+                )}
               </div>
 
               <div className="history-actions">
-                {!isExpired && (
+                {!isExpired ? (
                   <>
                     <button
                       onClick={() => onPlay(download)}
@@ -197,20 +229,31 @@ function DownloadHistory({ downloads, apiUrl, onDelete, onPlay }) {
                     >
                       <Download size={14} />
                     </a>
-
-                    {download.url && (
-                      <a
-                        href={download.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="action-btn secondary"
-                        title="Open Original"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <ExternalLink size={14} />
-                      </a>
-                    )}
                   </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => handleRedownload(download)}
+                      className="action-btn primary"
+                      title="Re-download"
+                      disabled={!download.url}
+                    >
+                      <RefreshCw size={14} />
+                    </button>
+                  </>
+                )}
+
+                {download.url && (
+                  <a
+                    href={download.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="action-btn secondary"
+                    title="Open Original"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <ExternalLink size={14} />
+                  </a>
                 )}
 
                 <button
