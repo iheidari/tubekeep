@@ -91,9 +91,9 @@ jobs:
             pm2 startOrRestart deploy/ecosystem.config.js --env production
             pm2 save
             
-            echo "🔧 Configuring Caddy..."
-            sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
-            sudo systemctl reload caddy
+            # Note: Caddy configuration requires manual update on server:
+            # sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+            # sudo systemctl reload caddy
             
             # Verify deployment
             echo ""
@@ -104,4 +104,6 @@ jobs:
             echo "Status check:"
             pm2 status
             echo ""
-            sudo systemctl is-active caddy && echo "✅ Caddy is running" || echo "❌ Caddy is not running"
+            echo "Note: To update Caddy config, run on server:"
+            echo "  sudo cp deploy/Caddyfile /etc/caddy/Caddyfile"
+            echo "  sudo systemctl reload caddy"
