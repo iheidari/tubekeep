@@ -27,6 +27,10 @@ export default defineConfig({
         entryFileNames: 'assets/[name]-[hash].js',
         chunkFileNames: 'assets/[name]-[hash].js',
         assetFileNames: (assetInfo) => {
+          // Handle case where name might be undefined (e.g., CSS files)
+          if (!assetInfo.name) {
+            return 'assets/[name]-[hash][extname]'
+          }
           const info = assetInfo.name.split('.')
           const ext = info[info.length - 1]
           if (/\.(png|jpe?g|gif|svg|webp|ico)$/i.test(assetInfo.name)) {
