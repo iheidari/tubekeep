@@ -83,12 +83,7 @@ CADDYFILE_CONTENT='ytd.heidari.ca {
     file_server
     
     # API routes to backend
-    reverse_proxy /api/* localhost:3001 {
-        header_up Host {host}
-        header_up X-Real-IP {remote}
-        header_up X-Forwarded-For {remote}
-        header_up X-Forwarded-Proto {scheme}
-    }
+    reverse_proxy /api/* localhost:3001
     
     # Handle React Router (SPA)
     try_files {path} /index.html
@@ -122,20 +117,10 @@ cloud.heidari.ca {
     reverse_proxy localhost:8080 {
         header_up Host {host}
         header_up X-Real-IP {remote}
-        header_up X-Forwarded-For {remote}
-        header_up X-Forwarded-Proto {scheme}
         
         # WebSocket support for Nextcloud
         header_up Upgrade {http_upgrade}
         header_up Connection {http_connection}
-    }
-    
-    # Increase timeouts for file uploads
-    timeouts {
-        read_body 600s
-        read_header 30s
-        write 600s
-        idle 300s
     }
     
     # Logging
