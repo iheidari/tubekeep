@@ -81,7 +81,11 @@ jobs:
           port: 22222
           script: |
             cd /data/ytd
-            
+
+            echo "📦 Updating yt-dlp..."
+            pip3 install -U yt-dlp || true
+            echo "yt-dlp version: $(yt-dlp --version)"
+
             echo "📦 Installing production dependencies..."
             cd backend
             npm ci --production

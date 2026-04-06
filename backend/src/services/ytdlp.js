@@ -50,7 +50,6 @@ async function getVideoInfo(url) {
     const { stdout } = await runYtDlp([
       '--dump-json',
       '--no-download',
-      '--extractor-args', 'youtube:player_client=ios,web',
       url
     ]);
 

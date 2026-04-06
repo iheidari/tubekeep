@@ -49,6 +49,9 @@ router.get('/progress/:downloadId', async (req, res) => {
     res.write(`data: ${JSON.stringify(data)}\n\n`);
   };
 
+  let result;
+  let progress = 0;
+
   // Heartbeat to prevent proxy timeout (every 15 seconds)
   const heartbeatInterval = setInterval(() => {
     sendEvent({ type: 'ping', downloadId, progress });
@@ -56,9 +59,6 @@ router.get('/progress/:downloadId', async (req, res) => {
 
   try {
     sendEvent({ type: 'started', downloadId, progress: 0 });
-
-    let result;
-    let progress = 0;
 
     const onProgress = (p) => {
       progress = Math.min(100, Math.max(0, p));
