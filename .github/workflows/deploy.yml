@@ -83,7 +83,8 @@ jobs:
             cd /data/ytd
 
             echo "📦 Updating yt-dlp..."
-            pip3 install -U yt-dlp || true
+            curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
+            chmod a+rx /usr/local/bin/yt-dlp
             echo "yt-dlp version: $(yt-dlp --version)"
 
             echo "📦 Installing production dependencies..."
