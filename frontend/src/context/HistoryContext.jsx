@@ -3,15 +3,16 @@ import {
   HistoryContext,
   HISTORY_API_URL,
   HISTORY_STORAGE_KEY,
+  EXPIRED_STORAGE_KEY,
   HISTORY_EXPIRY_MS
 } from './historyContext.js'
 
-function loadFromStorage() {
+function loadKey(key) {
   try {
-    const saved = localStorage.getItem(HISTORY_STORAGE_KEY)
+    const saved = localStorage.getItem(key)
     if (saved) return JSON.parse(saved)
   } catch (err) {
-    console.error('❌ Error loading history from localStorage:', err)
+    console.error(`❌ Error loading ${key} from localStorage:`, err)
   }
   return []
 }
@@ -24,8 +25,8 @@ function decorate(d) {
 }
 
 export function HistoryProvider({ children }) {
-  const [history, setHistory] = useState(loadFromStorage)
-  const [expired, setExpired] = useState([])
+  const [history, setHistory] = useState(() => loadKey(HISTORY_STORAGE_KEY))
+  const [expired, setExpired] = useState(() => loadKey(EXPIRED_STORAGE_KEY))
   const historyRef = useRef(history)
 
   useEffect(() => {
@@ -36,6 +37,14 @@ export function HistoryProvider({ children }) {
       console.error('❌ Error saving history to localStorage:', err)
     }
   }, [history])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(EXPIRED_STORAGE_KEY, JSON.stringify(expired))
+    } catch (err) {
+      console.error('❌ Error saving expired to localStorage:', err)
+    }
+  }, [expired])
 
   useEffect(() => {
     let cancelled = false
@@ -60,7 +69,12 @@ export function HistoryProvider({ children }) {
           .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
 
         setHistory(merged)
-        setExpired(stalePrunable.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)))
+        setExpired(prev => {
+          const seenIds = new Set([...prev.map(d => d.downloadId), ...serverIds])
+          const newlyExpired = stalePrunable.filter(d => !seenIds.has(d.downloadId))
+          return [...newlyExpired, ...prev]
+            .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+        })
       } catch (err) {
         console.error('❌ Server sync error:', err)
       }
@@ -75,6 +89,10 @@ export function HistoryProvider({ children }) {
     setHistory(prev => {
       const without = prev.filter(d => d.downloadId !== decorated.downloadId)
       return [decorated, ...without]
+    })
+    setExpired(prev => {
+      if (!decorated.url) return prev
+      return prev.filter(d => d.url !== decorated.url)
     })
   }, [])
 
