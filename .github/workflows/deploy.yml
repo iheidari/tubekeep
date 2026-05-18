@@ -1,114 +1,74 @@
-name: Deploy to Production
+name: Build & Deploy
 
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
-    inputs:
-      reason:
-        description: 'Reason for manual deployment'
-        required: false
-        default: 'Manual trigger'
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v5
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: |
-            backend/package-lock.json
-            frontend/package-lock.json
-      
-      - name: Install backend dependencies
-        working-directory: ./backend
-        run: npm ci
-      
-      - name: Install and build frontend
-        working-directory: ./frontend
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push image
+        id: meta
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install cloudflared
         run: |
-          npm ci
-          npm run build
-      
-      - name: Deploy to server
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22222
-          script_stop: true
-          script: |
-            echo "🚀 Starting deployment to ytd.heidari.ca..."
-            
-            # Create necessary directories
-            mkdir -p /data/ytd/logs
-            mkdir -p /data/ytd/backend/downloads
-            
-            # Backup ecosystem config if it exists
-            if [ -f /data/ytd/deploy/ecosystem.config.js ]; then
-              cp /data/ytd/deploy/ecosystem.config.js /tmp/ecosystem.config.js.backup
-            fi
-            
-            # Remove old deployment (preserving downloads and logs)
-            cd /data/ytd
-            rm -rf backend/src backend/package*.json frontend node_modules deploy 2>/dev/null || true
-      
-      - name: Copy files to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22222
-          source: "backend,frontend/dist,deploy"
-          target: "/data/ytd"
-          strip_components: 0
-      
-      - name: Finalize deployment
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: 22222
-          script: |
-            cd /data/ytd
+          curl -fsSL -o cloudflared.deb \
+            https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared.deb
 
-            echo "📦 Updating yt-dlp..."
-            export PATH="$HOME/.local/bin:$PATH"
-            pipx install "yt-dlp[default]" --force 2>/dev/null || pipx upgrade yt-dlp 2>/dev/null || true
-            echo "yt-dlp version: $(yt-dlp --version)"
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          cat > ~/.ssh/config <<EOF
+          Host ${{ secrets.SERVER_HOST }}
+            ProxyCommand cloudflared access ssh --hostname %h --service-token-id ${{ secrets.CF_ACCESS_CLIENT_ID }} --service-token-secret ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
+          EOF
 
-            echo "📦 Installing production dependencies..."
-            cd backend
-            npm ci --production
-            cd ..
-            
-            echo "🔄 Starting PM2..."
-            pm2 startOrRestart deploy/ecosystem.config.js --env production
-            pm2 save
-            
-            # Note: Caddy configuration requires manual update on server:
-            # sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
-            # sudo systemctl reload caddy
-            
-            # Verify deployment
-            echo ""
-            echo "✅ Deployment complete!"
-            echo ""
-            echo "🌐 Your app is live at: https://ytd.heidari.ca"
-            echo ""
-            echo "Status check:"
-            pm2 status
-            echo ""
-            echo "Note: To update Caddy config, run on server:"
-            echo "  sudo cp deploy/Caddyfile /etc/caddy/Caddyfile"
-            echo "  sudo systemctl reload caddy"
+      - name: Deploy on Proxmox Docker host
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -p ${{ secrets.SERVER_SSH_PORT }} \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} \
+            'set -e
+             cd /opt/yt-downloader
+             echo "${{ secrets.GHCR_READ_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+             docker compose pull
+             docker compose up -d --remove-orphans
+             docker image prune -f'

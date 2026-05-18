@@ -1,149 +1,161 @@
-# SSH Key Setup for GitHub Actions Deployment
+# Deployment Setup
 
-This guide walks you through setting up SSH key authentication so GitHub Actions can deploy to your server automatically.
+This guide walks you through configuring GitHub Actions to build the Docker image, push it to GHCR, and roll it out on your Proxmox Docker host via a Cloudflare Access SSH proxy.
+
+The workflow at `.github/workflows/deploy.yml`:
+1. Builds `ghcr.io/iheidari/yt-downloader:latest` and `:<sha>`.
+2. SSHes to your host through `cloudflared access` (no public SSH port required).
+3. Runs `docker compose pull && docker compose up -d` in `/opt/yt-downloader`.
 
 ---
 
-## 🔑 Step 1: Generate SSH Key Pair (on your local machine)
+## 1. Generate an SSH key pair for CI
 
-If you don't already have an SSH key for GitHub Actions, generate one:
+On your local machine:
 
 ```bash
-# Generate a new SSH key (don't use your personal key for security)
 ssh-keygen -t ed25519 -C "github-actions-deploy" -f ~/.ssh/github-actions-deploy
-
-# When prompted for a passphrase, just press Enter (no passphrase for CI/CD)
+# Press Enter for an empty passphrase
 ```
 
-This creates two files:
-- `~/.ssh/github-actions-deploy` - **Private key** (keep secret!)
-- `~/.ssh/github-actions-deploy.pub` - **Public key** (goes on server)
-
----
-
-## 🖥️ Step 2: Add Public Key to Your Server
-
-Copy the public key to your server's authorized_keys:
+Add the **public** key to your server:
 
 ```bash
-# Copy public key to server
-ssh-copy-id -i ~/.ssh/github-actions-deploy.pub user@your-server-ip
-
-# Or manually:
-cat ~/.ssh/github-actions-deploy.pub | ssh user@your-server-ip "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
+cat ~/.ssh/github-actions-deploy.pub \
+  | ssh user@your-server "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
 ```
 
 ---
 
-## 🔐 Step 3: Add Private Key to GitHub Secrets
+## 2. Create a Cloudflare Access service token
 
-1. Go to your GitHub repository: `https://github.com/iheidari/yt-downloader`
+GitHub Actions reaches your server through a Cloudflare-protected SSH hostname. You need a service token so the runner can satisfy the Access policy.
 
-2. Navigate to: **Settings → Secrets and variables → Actions**
-
-3. Click **New repository secret**
-
-4. Add these three secrets:
-
-### Secret 1: SSH_PRIVATE_KEY
-- **Name**: `SSH_PRIVATE_KEY`
-- **Value**: Copy the entire content of `~/.ssh/github-actions-deploy` including:
-  ```
-  -----BEGIN OPENSSH PRIVATE KEY-----
-  b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
-  ...
-  -----END OPENSSH PRIVATE KEY-----
-  ```
-
-### Secret 2: SERVER_HOST
-- **Name**: `SERVER_HOST`
-- **Value**: Your server's IP address or hostname (e.g., `192.168.1.100` or `your-server.com`)
-
-### Secret 3: SERVER_USER
-- **Name**: `SERVER_USER`
-- **Value**: Your SSH username (e.g., `root`, `ubuntu`, `deploy`)
+1. Cloudflare Zero Trust → **Access → Service Auth → Service Tokens** → **Create Service Token**.
+2. Copy the **Client ID** and **Client Secret** (the secret is shown once).
+3. In the Access application protecting your SSH hostname, add a policy that includes this service token.
 
 ---
 
-## 🧪 Step 4: Test SSH Connection
+## 3. Create a GHCR pull token
 
-From your local machine:
+The host pulls the image from GitHub Container Registry, so it needs a Personal Access Token with `read:packages`.
+
+1. GitHub → **Settings → Developer settings → Personal access tokens (classic)** → **Generate new token**.
+2. Scope: `read:packages`.
+3. Save the token — you'll add it as `GHCR_READ_TOKEN` below.
+
+---
+
+## 4. Add GitHub repository secrets
+
+Go to `https://github.com/iheidari/yt-downloader` → **Settings → Secrets and variables → Actions** and add:
+
+| Secret | Value |
+| --- | --- |
+| `SSH_PRIVATE_KEY` | Full contents of `~/.ssh/github-actions-deploy` (including BEGIN/END lines) |
+| `SERVER_HOST` | SSH hostname protected by Cloudflare Access (e.g. `ssh.heidari.ca`) |
+| `SERVER_USER` | SSH username on the Docker host |
+| `SERVER_SSH_PORT` | SSH port on the host (e.g. `22`) |
+| `CF_ACCESS_CLIENT_ID` | Cloudflare Access service token Client ID |
+| `CF_ACCESS_CLIENT_SECRET` | Cloudflare Access service token Client Secret |
+| `GHCR_READ_TOKEN` | GitHub PAT with `read:packages` |
+
+---
+
+## 5. Prepare the Docker host
+
+One-time setup on the Proxmox Docker host:
 
 ```bash
-# Test the connection
-ssh -i ~/.ssh/github-actions-deploy user@your-server-ip
+sudo mkdir -p /opt/yt-downloader/downloads
+sudo chown -R "$USER:$USER" /opt/yt-downloader
+cd /opt/yt-downloader
 
-# Should log in without password prompt
+# Copy docker-compose.yml from the repo
+scp /path/to/repo/docker-compose.yml user@host:/opt/yt-downloader/
+
+# Create .env on the host
+cat > /opt/yt-downloader/.env <<'EOF'
+NODE_ENV=production
+PORT=3001
+FRONTEND_URL=https://ytd.heidari.ca
+EOF
+
+# Log in to GHCR once so the first pull works
+echo "<GHCR_READ_TOKEN>" | docker login ghcr.io -u iheidari --password-stdin
 ```
 
 ---
 
-## 🚀 Step 5: Deploy!
+## 6. Publish the app via Cloudflare Tunnel
 
-Once secrets are set, simply push to main:
+There is no Caddy and no host-exposed port required — Cloudflare Tunnel terminates TLS and routes the public hostname directly to the container.
+
+In Cloudflare Zero Trust → **Networks → Tunnels → your tunnel → Public Hostname**, add:
+
+- **Subdomain**: `ytd`
+- **Domain**: `heidari.ca`
+- **Service**: `http://localhost:3001` (or `http://yt-downloader:3001` if `cloudflared` runs in the same Docker network)
+
+---
+
+## 7. Test the path manually
+
+From your local machine, confirm the Cloudflare Access SSH proxy works before relying on Actions:
+
+```bash
+cloudflared access ssh \
+  --hostname ssh.heidari.ca \
+  --service-token-id "$CF_ACCESS_CLIENT_ID" \
+  --service-token-secret "$CF_ACCESS_CLIENT_SECRET" \
+  -- -i ~/.ssh/github-actions-deploy -p 22 user@ssh.heidari.ca
+```
+
+You should land on the host with no password prompt.
+
+---
+
+## 8. Deploy
 
 ```bash
 git push origin main
 ```
 
-GitHub Actions will automatically deploy to your server!
+The `Build & Deploy` workflow builds the image, pushes to GHCR, and rolls the container on the host.
 
 ---
 
-## 🔒 Security Best Practices
+## Troubleshooting
 
-1. **Use a dedicated key** - Don't use your personal SSH key for CI/CD
-2. **Limit key permissions** - The GitHub Actions key should only deploy, not have full server access
-3. **Restrict to specific commands** (optional advanced):
-   ```bash
-   # On server, edit ~/.ssh/authorized_keys to restrict this key:
-   command="/data/ytl/deploy/deploy-hook.sh",no-agent-forwarding,no-X11-forwarding,no-pty ssh-ed25519 AAA... github-actions-deploy
-   ```
+**`denied: permission_denied` when pushing to GHCR**
+The build job needs `packages: write` (already set in the workflow) and the repo must allow GitHub Actions to write packages: Settings → Actions → General → Workflow permissions → "Read and write permissions".
 
-4. **Rotate keys periodically** - Generate new keys every 6-12 months
+**`unauthorized` when the host pulls the image**
+`GHCR_READ_TOKEN` is missing or lacks `read:packages`. Re-run `docker login ghcr.io` on the host with a valid PAT.
 
----
+**`cloudflared access ssh` hangs or returns 403**
+The service token isn't included in the Access policy for that hostname, or the token client ID/secret are wrong.
 
-## 🐛 Troubleshooting
+**Container is up but `ytd.heidari.ca` returns 502**
+The Cloudflare Tunnel public hostname isn't pointing at `http://localhost:3001` (or the right Docker network name).
 
-### "Permission denied (publickey)"
+**Inspect on the host**
 ```bash
-# Check SSH key is added
-ssh-add -l
-
-# If not listed, add it
-ssh-add ~/.ssh/github-actions-deploy
-
-# Verify key permissions (should be 600)
-chmod 600 ~/.ssh/github-actions-deploy
-chmod 644 ~/.ssh/github-actions-deploy.pub
+cd /opt/yt-downloader
+docker compose ps
+docker compose logs -f app
 ```
 
-### GitHub Actions fails with SSH error
-1. Verify secrets are correctly entered in GitHub (no extra spaces)
-2. Ensure the private key includes `-----BEGIN OPENSSH PRIVATE KEY-----` and `-----END OPENSSH PRIVATE KEY-----`
-3. Test the key manually: `ssh -i ~/.ssh/github-actions-deploy user@server`
-
-### "Host key verification failed"
-The server's host key changed. Update known_hosts on GitHub Actions runner (handled automatically by the workflow using `appleboy/ssh-action` which ignores host key checking for CI/CD).
-
 ---
 
-## ✅ Quick Checklist
+## Checklist
 
-- [ ] Generated SSH key pair: `ssh-keygen -t ed25519 -C "github-actions-deploy"`
-- [ ] Copied public key to server: `ssh-copy-id -i ...`
-- [ ] Added `SSH_PRIVATE_KEY` to GitHub Secrets
-- [ ] Added `SERVER_HOST` to GitHub Secrets  
-- [ ] Added `SERVER_USER` to GitHub Secrets
-- [ ] Tested SSH connection manually
-- [ ] Pushed to main branch to trigger deployment
-
----
-
-## 📞 Support
-
-If deployment fails, check:
-1. GitHub Actions logs: Go to your repo → Actions tab → Click failed run
-2. Server logs: `ssh user@server "pm2 logs"`
-3. Caddy status: `ssh user@server "sudo systemctl status caddy"`
+- [ ] Generated `~/.ssh/github-actions-deploy` and installed the public key on the host
+- [ ] Created a Cloudflare Access service token and added it to the SSH hostname policy
+- [ ] Created a GHCR PAT with `read:packages`
+- [ ] Added all seven secrets to the GitHub repo
+- [ ] Prepared `/opt/yt-downloader` with `docker-compose.yml` and `.env`
+- [ ] Configured a Cloudflare Tunnel public hostname for `ytd.heidari.ca`
+- [ ] Verified `cloudflared access ssh` works locally
+- [ ] Pushed to `main` and confirmed the workflow succeeded
