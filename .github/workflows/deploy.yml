@@ -7,6 +7,9 @@ on:
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
+  # Docker actions still ship Node 20; opt their runtime into Node 24 ahead of
+  # GitHub forcing the switch on 2026-06-02. Remove once the actions ship Node 24.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   build:
