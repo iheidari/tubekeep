@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import VideoPlayer from '../components/VideoPlayer'
 import { useHistory } from '../context/useHistory'
+import { usePlayer } from '../context/usePlayer'
 
 function PlayPageContent({ downloadId }) {
   const { history, apiUrl, findById } = useHistory()
+  const { playTrack } = usePlayer()
   const [coldResult, setColdResult] = useState({ status: 'pending', data: null })
 
   const fromContext = history.find(d => d.downloadId === downloadId) || null
@@ -47,6 +49,10 @@ function PlayPageContent({ downloadId }) {
 
   const resolved = fromContext || (coldResult.status === 'found' ? coldResult.data : null)
   const missing = !fromContext && coldResult.status === 'missing'
+
+  useEffect(() => {
+    if (resolved) playTrack(resolved, apiUrl)
+  }, [resolved, apiUrl, playTrack])
 
   const backLink = (
     <Link

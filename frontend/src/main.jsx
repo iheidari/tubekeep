@@ -4,6 +4,7 @@ import { createBrowserRouter, RouterProvider } from 'react-router-dom'
 import './index.css'
 import App from './App.jsx'
 import { HistoryProvider } from './context/HistoryContext.jsx'
+import { PlayerProvider } from './context/PlayerContext.jsx'
 import HomePage from './pages/HomePage.jsx'
 import InfoPage from './pages/InfoPage.jsx'
 import DownloadPage from './pages/DownloadPage.jsx'
@@ -29,7 +30,9 @@ const router = createBrowserRouter([
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <HistoryProvider>
-      <RouterProvider router={router} />
+      <PlayerProvider>
+        <RouterProvider router={router} />
+      </PlayerProvider>
     </HistoryProvider>
   </StrictMode>
 )

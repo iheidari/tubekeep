@@ -1,7 +1,11 @@
 import { Link, NavLink, Outlet } from 'react-router-dom'
 import './App.css'
+import PlayerDock from './components/PlayerDock'
+import { usePlayer } from './context/usePlayer'
 
 function App() {
+  const { current, stageActive } = usePlayer()
+  const dockVisible = !!current && !stageActive
   const navLinkClass = ({ isActive }) =>
     `font-label-md text-label-md transition-colors px-3 py-1 rounded-lg ${
       isActive
@@ -38,9 +42,15 @@ function App() {
         </div>
       </header>
 
-      <main className="flex-1 px-gutter py-stack-lg max-w-container-max mx-auto w-full">
+      <main
+        className={`flex-1 px-gutter py-stack-lg max-w-container-max mx-auto w-full ${
+          dockVisible ? 'pb-24' : ''
+        }`}
+      >
         <Outlet />
       </main>
+
+      <PlayerDock />
     </div>
   )
 }
