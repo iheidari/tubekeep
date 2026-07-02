@@ -1,6 +1,6 @@
-const { spawn } = require('child_process');
-const path = require('path');
-const fs = require('fs');
+const { spawn } = require('node:child_process');
+const path = require('node:path');
+const fs = require('node:fs');
 const { downloadsDir } = require('../utils/storage');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

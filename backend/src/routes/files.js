@@ -1,14 +1,13 @@
 const express = require('express');
 const router = express.Router();
-const path = require('path');
-const fs = require('fs');
+const path = require('node:path');
+const fs = require('node:fs');
 const {
   listDownloads,
   getDownloadFilePath,
   deleteDownload,
   expireDownload,
   setKept,
-  downloadsDir,
 } = require('../utils/storage');
 
 // RFC 5987 encoding for unicode filenames in Content-Disposition header
@@ -22,12 +21,13 @@ function encodeRFC5987(filename) {
 function getContentDisposition(filename, isDownload) {
   const dispositionType = isDownload ? 'attachment' : 'inline';
   // Use both filename (for compatibility) and filename* (for unicode)
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: intentionally strips all non-ASCII (incl. control chars) for the ASCII filename fallback
   const asciiFilename = filename.replace(/[^\x00-\x7F]/g, '_');
   const encodedFilename = encodeRFC5987(filename);
   return `${dispositionType}; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`;
 }
 
-router.get('/', (req, res) => {
+router.get('/', (_req, res) => {
   try {
     const downloads = listDownloads();
     res.json({

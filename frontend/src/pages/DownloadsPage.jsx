@@ -81,6 +81,7 @@ function ActiveCard({ download, apiUrl, onDelete, onKeep }) {
             </h3>
             <div className="flex items-center gap-2 flex-shrink-0">
               <button
+                type="button"
                 onClick={() => onKeep(download.downloadId, !download.kept)}
                 title={
                   download.kept ? 'Kept — click to let it expire' : 'Keep this file from expiring'
@@ -148,6 +149,7 @@ function ActiveCard({ download, apiUrl, onDelete, onKeep }) {
           </Link>
           <div className="flex items-center gap-1">
             <button
+              type="button"
               onClick={handleShare}
               className="p-2 text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-all rounded-full"
               title={copied ? 'Copied!' : 'Share play link'}
@@ -163,6 +165,7 @@ function ActiveCard({ download, apiUrl, onDelete, onKeep }) {
               <span className="material-symbols-outlined">download</span>
             </a>
             <button
+              type="button"
               onClick={() => onDelete(download.downloadId)}
               className="p-2 text-on-surface-variant hover:text-error hover:bg-error-container/20 transition-all rounded-full"
               title="Delete"
@@ -245,6 +248,7 @@ function ExpiredCard({ download, onForget }) {
           )}
           <div className="flex items-center gap-1">
             <button
+              type="button"
               onClick={() => onForget(download.downloadId)}
               className="p-2 text-on-surface-variant hover:text-error hover:bg-error-container/20 transition-all rounded-full"
               title="Forget"
@@ -284,6 +288,7 @@ function DownloadsPage() {
         <div className="flex items-center gap-2 bg-surface-container-low p-1 rounded-lg">
           {FILTERS.map((f) => (
             <button
+              type="button"
               key={f.id}
               onClick={() => setFilter(f.id)}
               className={

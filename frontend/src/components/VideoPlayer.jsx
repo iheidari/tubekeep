@@ -83,6 +83,7 @@ function VideoPlayer({ download, apiUrl }) {
 
           <div className="grid gap-4 border-t border-surface-variant pt-6 grid-cols-[repeat(auto-fit,minmax(140px,1fr))]">
             <button
+              type="button"
               onClick={handleShare}
               className="flex items-center justify-center gap-2 bg-primary text-on-primary rounded-lg font-label-md text-label-md hover:bg-primary-container transition-colors active:scale-95 py-4 px-4"
             >
@@ -122,6 +123,7 @@ function VideoPlayer({ download, apiUrl }) {
             ) : null}
 
             <button
+              type="button"
               onClick={handleDelete}
               className="flex items-center justify-center gap-2 border border-error/30 text-error rounded-lg font-label-md text-label-md hover:bg-error-container/50 transition-colors active:scale-95 py-4 px-4"
             >

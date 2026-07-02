@@ -163,6 +163,7 @@ export function PlayerProvider({ children }) {
       {/* Parking spot: keeps the element in the document (so playback survives)
           whenever neither the stage nor the dock is mounted. */}
       <div ref={homeRef} className="hidden" aria-hidden="true">
+        {/* biome-ignore lint/a11y/useMediaCaption: playing user-downloaded media with no caption track available */}
         <video ref={mediaRef} src={current?.streamUrl || undefined} playsInline />
       </div>
       {children}

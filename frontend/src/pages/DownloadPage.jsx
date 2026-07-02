@@ -103,6 +103,7 @@ function DownloadPage() {
           <span className="material-symbols-outlined text-[40px] text-error mb-2 block">error</span>
           <p className="font-body-md text-body-md text-on-error-container mb-4">{error}</p>
           <button
+            type="button"
             onClick={() => navigate('/')}
             className="bg-primary text-on-primary px-4 py-2 rounded-lg font-label-md text-label-md hover:bg-primary-container transition-colors"
           >

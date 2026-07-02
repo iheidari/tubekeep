@@ -5,7 +5,7 @@ const { downloadVideo, downloadAudio } = require('../services/ytdlp');
 const { saveDownloadMetadata } = require('../utils/storage');
 
 router.post('/', async (req, res) => {
-  const { url, formatId, type, title, thumbnail } = req.body;
+  const { url, formatId, type } = req.body;
 
   if (!url || !formatId) {
     return res.status(400).json({

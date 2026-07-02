@@ -33,7 +33,7 @@ function PlayPageContent({ downloadId }) {
             })
             return
           }
-          if (found && found.expired) {
+          if (found?.expired) {
             setColdResult({ status: 'missing', data: found })
             return
           }

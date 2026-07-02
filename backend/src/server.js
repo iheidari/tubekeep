@@ -2,8 +2,8 @@ const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
-const path = require('path');
-const fs = require('fs');
+const path = require('node:path');
+const fs = require('node:fs');
 
 const infoRoutes = require('./routes/info');
 const downloadRoutes = require('./routes/download');
@@ -47,19 +47,19 @@ app.use('/api/info', infoRoutes);
 app.use('/api/download', downloadRoutes);
 app.use('/api/files', filesRoutes);
 
-app.get('/health', (req, res) => {
+app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
 const frontendDist = path.join(__dirname, '../../frontend/dist');
 if (fs.existsSync(frontendDist)) {
   app.use(express.static(frontendDist));
-  app.get(/^\/(?!api\/|health$).*/, (req, res) => {
+  app.get(/^\/(?!api\/|health$).*/, (_req, res) => {
     res.sendFile(path.join(frontendDist, 'index.html'));
   });
 }
 
-app.use((err, req, res, next) => {
+app.use((err, _req, res, _next) => {
   console.error('Error:', err);
   res.status(500).json({
     error: 'Internal server error',

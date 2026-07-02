@@ -1,5 +1,5 @@
-const path = require('path');
-const fs = require('fs');
+const path = require('node:path');
+const fs = require('node:fs');
 
 const downloadsDir = path.join(__dirname, '../../downloads');
 const METADATA_FILE = 'metadata.json';

@@ -7,7 +7,7 @@
   },
   "files": {
     "ignoreUnknown": true,
-    "includes": ["**", "!**/dist", "!**/downloads", "!**/node_modules"]
+    "includes": ["**", "!**/dist", "!**/downloads", "!**/node_modules", "!**/*.svg"]
   },
   "formatter": {
     "enabled": true,
@@ -21,7 +21,7 @@
       "react": "recommended"
     },
     "rules": {
-      "recommended": true
+      "preset": "recommended"
     }
   },
   "javascript": {

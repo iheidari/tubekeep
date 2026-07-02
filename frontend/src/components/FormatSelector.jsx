@@ -15,7 +15,7 @@ function FormatSelector({ info, onDownload, startingFormat = null }) {
   const getHeight = (res) => {
     if (!res) return 0
     const match = res.match(/(\d+)x(\d+)/)
-    return match ? parseInt(match[2]) : 0
+    return match ? parseInt(match[2], 10) : 0
   }
 
   const heightLabel = (res) => {
@@ -192,6 +192,7 @@ function FormatSelector({ info, onDownload, startingFormat = null }) {
                       </div>
                     </div>
                     <button
+                      type="button"
                       onClick={() => onDownload(format.formatId, format._type, keep)}
                       disabled={startingFormat !== null}
                       className="flex items-center gap-2 bg-primary text-on-primary px-4 py-2 rounded-lg font-label-md text-label-md active:opacity-80 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
@@ -253,6 +254,7 @@ function FormatSelector({ info, onDownload, startingFormat = null }) {
                       </div>
                     </div>
                     <button
+                      type="button"
                       onClick={() => onDownload(format.formatId, 'audio', keep)}
                       disabled={startingFormat !== null}
                       className="flex items-center gap-2 border border-primary text-primary px-4 py-2 rounded-lg font-label-md text-label-md hover:bg-primary/5 active:opacity-80 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
