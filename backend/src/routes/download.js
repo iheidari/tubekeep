@@ -3,6 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { downloadVideo, downloadAudio, isSupportedUrl } = require('../services/ytdlp');
 const { saveDownloadMetadata } = require('../utils/storage');
+const { initSSE } = require('../utils/sse');
 
 router.post('/', async (req, res) => {
   const { url, formatId, type } = req.body;
@@ -53,17 +54,7 @@ router.get('/progress/:downloadId', async (req, res) => {
     });
   }
 
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache, no-transform');
-  res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx/proxy buffering
-  res.flushHeaders();
-
-  const sendEvent = (data) => {
-    if (res.writableEnded) return;
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
-    if (typeof res.flush === 'function') res.flush();
-  };
+  const sendEvent = initSSE(res);
 
   let result;
   let progress = 0;

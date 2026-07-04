@@ -1,5 +1,17 @@
 // Shared media helpers used across pages/components.
 
+// Single source of truth for the API origin: explicit env, else same-origin
+// (works in single-server mode). Lives here (not in React context) so any lib
+// module can import it; the history context re-exports it as HISTORY_API_URL.
+export const API_URL =
+  import.meta.env.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin : '')
+
+// How long a file lives on our server before it's expired (mirrors the backend
+// MAX_FILE_AGE_HOURS in services/cleanup.js). Exposed so the UI can gate
+// time-sensitive actions — e.g. don't start a cloud move that would race the
+// expiry cleanup.
+export const FILE_EXPIRY_MS = 60 * 60 * 1000
+
 const AUDIO_RE = /\.(mp3|m4a|ogg|opus|wav|flac)$/i
 
 export function isAudioFile(filename) {

@@ -1,7 +1,9 @@
 const { cleanupOldDownloads } = require('../utils/storage');
 
 const CLEANUP_INTERVAL_HOURS = 1;
-const MAX_FILE_AGE_HOURS = 24;
+// Downloads are a transfer, not storage: a visitor either moves a file to their
+// own cloud or downloads it to their device shortly after. Expire after 1h.
+const MAX_FILE_AGE_HOURS = 1;
 
 let cleanupInterval = null;
 

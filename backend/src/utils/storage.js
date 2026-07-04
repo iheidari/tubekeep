@@ -50,6 +50,32 @@ function getDownloadMetadata(downloadId) {
   return null;
 }
 
+// Build the listing row for a single download: metadata + its media files, with
+// `expired` derived from having no media files left. Returns null if the id is
+// invalid, has no/corrupt metadata, or its directory can't be read — so callers
+// (and listDownloads) can skip it without a corrupt row breaking the listing.
+function getDownload(downloadId) {
+  const metadata = getDownloadMetadata(downloadId);
+  if (!metadata) return null;
+
+  const dirPath = path.join(downloadsDir, downloadId);
+  let files;
+  try {
+    files = fs.readdirSync(dirPath).filter((f) => f !== METADATA_FILE);
+  } catch (err) {
+    console.error(`⚠️  Skipping unreadable download ${downloadId}: ${err.message}`);
+    return null;
+  }
+
+  return {
+    downloadId,
+    ...metadata,
+    files,
+    expired: files.length === 0,
+    path: dirPath,
+  };
+}
+
 function listDownloads() {
   let entries;
   try {
@@ -59,28 +85,10 @@ function listDownloads() {
   }
 
   const downloads = [];
-
   for (const entry of entries) {
-    // One corrupt directory/metadata row must not take down the whole listing
-    // (which the frontend polls on every page).
-    try {
-      if (!entry.isDirectory()) continue;
-
-      const metadata = getDownloadMetadata(entry.name);
-      if (!metadata) continue;
-
-      const dirPath = path.join(downloadsDir, entry.name);
-      const files = fs.readdirSync(dirPath).filter((f) => f !== METADATA_FILE);
-      downloads.push({
-        downloadId: entry.name,
-        ...metadata,
-        files,
-        expired: files.length === 0,
-        path: dirPath,
-      });
-    } catch (err) {
-      console.error(`⚠️  Skipping unreadable download ${entry.name}: ${err.message}`);
-    }
+    if (!entry.isDirectory()) continue;
+    const download = getDownload(entry.name);
+    if (download) downloads.push(download);
   }
 
   return downloads.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
@@ -190,8 +198,10 @@ function cleanupOldDownloads(maxAgeHours = 24) {
 
 module.exports = {
   downloadsDir,
+  isValidDownloadId,
   saveDownloadMetadata,
   getDownloadMetadata,
+  getDownload,
   listDownloads,
   getDownloadFilePath,
   ensureDownloadDir,

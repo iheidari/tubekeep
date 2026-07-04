@@ -1,3 +1,10 @@
+// Load backend/.env FIRST — before any module reads process.env. Without this
+// FRONTEND_URL (CORS origin) and the DROPBOX_* creds in .env are never applied,
+// so cross-origin requests get no Access-Control-Allow-Origin and the cloud
+// feature stays disabled. Requires must come after so their module-load-time
+// env reads (e.g. services/cloud/dropbox.js) see the loaded values.
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -8,12 +15,23 @@ const fs = require('node:fs');
 const infoRoutes = require('./routes/info');
 const downloadRoutes = require('./routes/download');
 const filesRoutes = require('./routes/files');
+const cloudRoutes = require('./routes/cloud');
 const { startCleanupScheduler } = require('./services/cleanup');
 const { downloadsDir } = require('./utils/storage');
 const { rateLimit } = require('./utils/rateLimit');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Never let the browser cache or revalidate dynamic API JSON. Express adds a
+// default weak ETag to res.json responses, so a repeat `GET /api/info` (fresh
+// yt-dlp output) answers `304 Not Modified` — and a cross-origin revalidated
+// 304 can surface in the browser as a bare "NetworkError". The data must not be
+// cached anyway (yt-dlp's signed URLs rotate per fetch), so kill ETags app-wide
+// and mark every /api response `no-store` (see the middleware below). Static
+// frontend assets keep their own serve-static ETags — this only affects
+// res.json/res.send-generated ones.
+app.set('etag', false);
 
 // Use helmet with a scoped CSP. It can't be fully locked down — the Tailwind
 // Play CDN JIT-compiles with `new Function` (needs unsafe-eval) and the inline
@@ -42,6 +60,11 @@ app.use(
     },
     crossOriginResourcePolicy: { policy: 'cross-origin' }, // Allow cross-origin resource sharing
     crossOriginEmbedderPolicy: false, // Allow embedding media
+    // Don't emit HSTS on a plain-HTTP localhost dev server: browsers store it
+    // per-host ignoring the port, so it can force-upgrade every
+    // http://localhost:* (incl. the Vite dev server) to https and then fail to
+    // connect. Keep HSTS in production, which is served over TLS.
+    ...(process.env.NODE_ENV === 'production' ? {} : { hsts: false }),
   }),
 );
 
@@ -66,11 +89,21 @@ if (!fs.existsSync(downloadsDir)) {
   fs.mkdirSync(downloadsDir, { recursive: true });
 }
 
+// Dynamic API responses must not be cached by the browser (pairs with the
+// app-wide `etag: false` above so /api/info never answers a 304).
+app.use('/api', (_req, res, next) => {
+  res.set('Cache-Control', 'no-store');
+  next();
+});
+
 // Throttle the endpoints that each shell out to yt-dlp. Generous limits: this
 // is a personal app, so the goal is only to cap runaway abuse, not normal use.
 app.use('/api/info', rateLimit({ windowMs: 60_000, max: 30 }), infoRoutes);
 app.use('/api/download', rateLimit({ windowMs: 60_000, max: 40 }), downloadRoutes);
 app.use('/api/files', filesRoutes);
+// OAuth exchange + upload kick-off talk to a provider; throttle per-IP. The SSE
+// progress stream shares this generous window (60/min absorbs reconnects).
+app.use('/api/cloud', rateLimit({ windowMs: 60_000, max: 60 }), cloudRoutes);
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

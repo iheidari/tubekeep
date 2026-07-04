@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import BackLink from '../components/BackLink'
+import MoveToCloud from '../components/MoveToCloud'
 import VideoPlayer from '../components/VideoPlayer'
 import { useHistory } from '../context/useHistory'
 import { usePlayer } from '../context/usePlayer'
@@ -9,6 +10,7 @@ import { fetchDownloads, fileUrl } from '../lib/media'
 function PlayPageContent({ downloadId }) {
   const { history, apiUrl, findById } = useHistory()
   const { playTrack } = usePlayer()
+  const navigate = useNavigate()
   const [coldResult, setColdResult] = useState({ status: 'pending', data: null })
 
   const fromContext = history.find((d) => d.downloadId === downloadId) || null
@@ -68,7 +70,8 @@ function PlayPageContent({ downloadId }) {
           </span>
           <h2 className="font-headline-md text-headline-md text-on-surface mb-2">File not found</h2>
           <p className="font-body-md text-body-md text-secondary mb-6">
-            This download may have expired (files are deleted after 24 hours).
+            This download may have expired (files are removed from our server after 1 hour) or been
+            moved to a cloud account.
           </p>
           <div className="flex items-center gap-3 justify-center flex-wrap">
             {stale?.url && (
@@ -106,7 +109,22 @@ function PlayPageContent({ downloadId }) {
     )
   }
 
-  return <VideoPlayer download={resolved} apiUrl={apiUrl} />
+  return (
+    <>
+      <VideoPlayer download={resolved} apiUrl={apiUrl} />
+      {!resolved.moved && (
+        <div className="max-w-4xl mx-auto mt-4 flex justify-end">
+          <MoveToCloud
+            download={resolved}
+            downloadHref={fileUrl(apiUrl, resolved.downloadId, resolved.filename, {
+              download: true,
+            })}
+            onMoved={() => navigate('/downloads')}
+          />
+        </div>
+      )}
+    </>
+  )
 }
 
 function PlayPage() {

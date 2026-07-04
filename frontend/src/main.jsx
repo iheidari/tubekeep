@@ -10,9 +10,12 @@ import DownloadsPage from './pages/DownloadsPage.jsx'
 import HomePage from './pages/HomePage.jsx'
 import InfoPage from './pages/InfoPage.jsx'
 import NotFoundPage from './pages/NotFoundPage.jsx'
+import OAuthCallbackPage from './pages/OAuthCallbackPage.jsx'
 import PlayPage from './pages/PlayPage.jsx'
 
 const router = createBrowserRouter([
+  // Standalone (outside the app shell) so the OAuth popup stays minimal.
+  { path: '/oauth/callback', element: <OAuthCallbackPage /> },
   {
     path: '/',
     element: <App />,
