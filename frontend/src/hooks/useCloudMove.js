@@ -5,7 +5,8 @@ import { API_URL } from '../lib/media'
 
 // Drives a single download's "Move to Dropbox" flow: lazy connect (popup) →
 // POST /api/cloud/upload (token in body) → SSE progress by jobId. On success it
-// flags the row as moved in history (the server has hard-deleted the file).
+// flags the row as moved in history (the server drops the media but keeps the
+// metadata row — source URL + cloud link — so it survives across devices).
 //
 // phase: idle | connecting | starting | queued | uploading | complete | error
 export function useCloudMove(download, { onMoved } = {}) {

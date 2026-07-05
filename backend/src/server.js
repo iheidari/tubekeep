@@ -60,6 +60,13 @@ app.use(
     },
     crossOriginResourcePolicy: { policy: 'cross-origin' }, // Allow cross-origin resource sharing
     crossOriginEmbedderPolicy: false, // Allow embedding media
+    // The Dropbox "Move to cloud" flow opens a consent popup that navigates
+    // cross-origin (dropbox.com) and relays the auth code back to its opener via
+    // postMessage. Helmet's default COOP `same-origin` severs window.opener the
+    // moment the popup goes cross-origin, so the callback lands with a null
+    // opener and the flow hangs. `same-origin-allow-popups` keeps the reference
+    // to popups this page opened while still isolating us from other openers.
+    crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
     // Don't emit HSTS on a plain-HTTP localhost dev server: browsers store it
     // per-host ignoring the port, so it can force-upgrade every
     // http://localhost:* (incl. the Vite dev server) to https and then fail to

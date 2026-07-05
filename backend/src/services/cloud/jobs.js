@@ -1,6 +1,6 @@
 const { EventEmitter } = require('node:events');
 const { v4: uuidv4 } = require('uuid');
-const { getDownload, getDownloadFilePath, deleteDownload } = require('../../utils/storage');
+const { getDownload, getDownloadFilePath, markMoved } = require('../../utils/storage');
 const { getProvider } = require('./index');
 const fs = require('node:fs');
 
@@ -106,12 +106,15 @@ async function run(job) {
       uploadedBefore += sizes[i];
     }
 
-    // Confirmed upload → hard-delete the local copy (Model A: move = leaves us).
-    deleteDownload(job.downloadId);
+    // Confirmed upload → drop the local media but KEEP the metadata row (with
+    // its source URL + cloud link) so the download stays re-downloadable from
+    // source and openable in the visitor's cloud, on any device.
+    const result = { provider: provider.name, ...last };
+    markMoved(job.downloadId, result);
 
     job.status = 'complete';
     job.progress = 100;
-    job.result = { provider: provider.name, ...last };
+    job.result = result;
     emit(job);
   } catch (err) {
     // Local file is intentionally kept on any failure so the visitor can retry

@@ -151,7 +151,12 @@ function setKept(downloadId, kept) {
   return true;
 }
 
-function expireDownload(downloadId) {
+// Drop a download's media files but KEEP metadata.json, then merge `patch` into
+// the metadata. This is the shared mechanism behind both lifecycle transitions
+// that retire media without hard-deleting the row: "expired" (aged out) and
+// "moved" (uploaded to the visitor's cloud). The row lives on — re-downloadable
+// from source — instead of the whole directory being removed by deleteDownload.
+function dropMediaAndPatch(downloadId, patch) {
   if (!isValidDownloadId(downloadId)) return false;
   const dirPath = path.join(downloadsDir, downloadId);
   if (!fs.existsSync(dirPath)) return false;
@@ -163,10 +168,22 @@ function expireDownload(downloadId) {
 
   const metadata = getDownloadMetadata(downloadId);
   if (metadata) {
-    metadata.expiredAt = new Date().toISOString();
-    saveDownloadMetadata(downloadId, metadata);
+    saveDownloadMetadata(downloadId, { ...metadata, ...patch });
   }
   return true;
+}
+
+function expireDownload(downloadId) {
+  return dropMediaAndPatch(downloadId, { expiredAt: new Date().toISOString() });
+}
+
+// Move-to-cloud lifecycle: the moved row keeps its source `url` + cloud link so
+// it stays re-downloadable from source and openable in the visitor's cloud.
+function markMoved(downloadId, moveInfo) {
+  return dropMediaAndPatch(downloadId, {
+    movedAt: new Date().toISOString(),
+    moved: moveInfo || {},
+  });
 }
 
 function cleanupOldDownloads(maxAgeHours = 24) {
@@ -207,6 +224,7 @@ module.exports = {
   ensureDownloadDir,
   deleteDownload,
   expireDownload,
+  markMoved,
   setKept,
   cleanupOldDownloads,
 };

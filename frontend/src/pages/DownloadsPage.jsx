@@ -11,6 +11,20 @@ const FILTERS = [
   { id: 'audio', label: 'Audio' },
 ]
 
+// Outlined "Redownload" button linking back to the info page for a source URL.
+// Shared by the expired and moved cards, whose media is gone from our server.
+function RedownloadLink({ url }) {
+  return (
+    <Link
+      to={`/info?url=${encodeURIComponent(url)}`}
+      className="border border-primary text-primary px-6 py-2 rounded-md font-label-md text-label-md flex items-center gap-2 hover:bg-primary/5 transition-all active:scale-95"
+    >
+      <span className="material-symbols-outlined text-[18px]">refresh</span>
+      Redownload
+    </Link>
+  )
+}
+
 function formatRelative(dateString) {
   if (!dateString) return ''
   const diff = Math.max(0, Date.now() - new Date(dateString).getTime())
@@ -223,13 +237,7 @@ function ExpiredCard({ download, onForget }) {
 
         <div className="flex items-center justify-between mt-4">
           {download.url ? (
-            <Link
-              to={`/info?url=${encodeURIComponent(download.url)}`}
-              className="border border-primary text-primary px-6 py-2 rounded-md font-label-md text-label-md flex items-center gap-2 hover:bg-primary/5 transition-all active:scale-95"
-            >
-              <span className="material-symbols-outlined text-[18px]">refresh</span>
-              Redownload
-            </Link>
+            <RedownloadLink url={download.url} />
           ) : (
             <span className="text-on-surface-variant/40 font-label-sm text-label-sm">
               No source URL
@@ -292,27 +300,40 @@ function MovedCard({ download, onForget }) {
               Moved to Dropbox
             </span>
           </div>
-          <p className="font-label-sm text-label-sm text-on-surface-variant mt-1">
+          {download.url && (
+            <a
+              href={download.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-label-sm text-label-sm text-on-surface-variant hover:text-primary mt-1 truncate block"
+            >
+              {download.url}
+            </a>
+          )}
+          <p className="font-label-sm text-label-sm text-on-surface-variant/70 mt-2">
             This file is now in your Dropbox and has been removed from our server.
           </p>
         </div>
 
         <div className="flex items-center justify-between mt-4">
-          {link ? (
-            <a
-              href={link}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="bg-primary text-on-primary px-6 py-2 rounded-md font-label-md text-label-md flex items-center gap-2 hover:opacity-90 active:scale-95 transition-all"
-            >
-              <span className="material-symbols-outlined text-[18px]">open_in_new</span>
-              Open in Dropbox
-            </a>
-          ) : (
-            <span className="text-on-surface-variant/60 font-label-sm text-label-sm">
-              Saved to Dropbox
-            </span>
-          )}
+          <div className="flex flex-wrap items-center gap-2">
+            {link ? (
+              <a
+                href={link}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="bg-primary text-on-primary px-6 py-2 rounded-md font-label-md text-label-md flex items-center gap-2 hover:opacity-90 active:scale-95 transition-all"
+              >
+                <span className="material-symbols-outlined text-[18px]">open_in_new</span>
+                Open in Dropbox
+              </a>
+            ) : (
+              <span className="text-on-surface-variant/60 font-label-sm text-label-sm">
+                Saved to Dropbox
+              </span>
+            )}
+            {download.url && <RedownloadLink url={download.url} />}
+          </div>
           <button
             type="button"
             onClick={() => onForget(download.downloadId)}
@@ -328,7 +349,7 @@ function MovedCard({ download, onForget }) {
 }
 
 function DownloadsPage() {
-  const { history, expired, apiUrl, removeDownload, forgetExpired, setKept, dropLocal } =
+  const { history, expired, apiUrl, removeDownload, forgetExpired, setKept, forgetMoved } =
     useHistory()
   const [filter, setFilter] = useState('all')
 
@@ -387,7 +408,7 @@ function DownloadsPage() {
         <div className="flex flex-col gap-4">
           {items.map((item) => {
             if (item.moved) {
-              return <MovedCard key={item.downloadId} download={item} onForget={dropLocal} />
+              return <MovedCard key={item.downloadId} download={item} onForget={forgetMoved} />
             }
             return item._expired ? (
               <ExpiredCard key={item.downloadId} download={item} onForget={forgetExpired} />
