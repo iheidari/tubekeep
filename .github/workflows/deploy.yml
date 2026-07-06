@@ -4,6 +4,9 @@ on:
   push:
     branches: [ main ]
   workflow_dispatch:
+  schedule:
+    # Daily rebuild to pull the latest yt-dlp (YouTube breaks extraction often).
+    - cron: '0 6 * * *'
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
@@ -57,6 +60,10 @@ jobs:
           tags: |
             ${{ env.IMAGE }}:latest
             ${{ env.IMAGE }}:${{ github.sha }}
+          # Unique per run → busts the yt-dlp layer cache so every build (push,
+          # manual, or the daily cron) ships the newest yt-dlp release.
+          build-args: |
+            YTDLP_BUST=${{ github.run_id }}-${{ github.run_attempt }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

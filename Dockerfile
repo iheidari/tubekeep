@@ -19,9 +19,7 @@ RUN apt-get update \
       python3-pip \
       ca-certificates \
       curl \
- && rm -rf /var/lib/apt/lists/* \
- && pip install --break-system-packages --no-cache-dir "yt-dlp[default]" \
- && yt-dlp --version
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -32,6 +30,16 @@ COPY backend/ ./backend/
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
 RUN mkdir -p /app/backend/downloads
+
+# yt-dlp needs frequent updates — YouTube breaks extraction every few weeks.
+# Installed LAST so the daily cache-bust below only invalidates this layer, not
+# the apt/npm layers above it. The scheduled build passes a fresh YTDLP_BUST
+# (the workflow run id), which changes the RUN's cache key so pip always pulls
+# the newest release instead of reusing a stale cached layer.
+ARG YTDLP_BUST=none
+RUN echo "yt-dlp build bust: ${YTDLP_BUST}" \
+ && pip install --break-system-packages --no-cache-dir --upgrade "yt-dlp[default]" \
+ && yt-dlp --version
 
 EXPOSE 3001
 
