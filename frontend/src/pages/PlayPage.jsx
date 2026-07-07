@@ -4,7 +4,7 @@ import BackLink from '../components/BackLink'
 import VideoPlayer from '../components/VideoPlayer'
 import { useHistory } from '../context/useHistory'
 import { usePlayer } from '../context/usePlayer'
-import { fetchDownloads, fileUrl } from '../lib/media'
+import { fetchDownloads, fileExpiryLabel, fileUrl } from '../lib/media'
 
 function PlayPageContent({ downloadId }) {
   const { history, apiUrl, findById } = useHistory()
@@ -68,8 +68,8 @@ function PlayPageContent({ downloadId }) {
           </span>
           <h2 className="font-headline-md text-headline-md text-on-surface mb-2">File not found</h2>
           <p className="font-body-md text-body-md text-secondary mb-6">
-            This download may have expired (files are removed from our server after 24 hours) or
-            been moved to a cloud account.
+            This download may have expired (files are removed from our server after{' '}
+            {fileExpiryLabel()}) or been moved to a cloud account.
           </p>
           <div className="flex items-center gap-3 justify-center flex-wrap">
             {stale?.url && (

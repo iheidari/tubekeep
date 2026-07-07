@@ -12,6 +12,13 @@ export const API_URL =
 // expiry cleanup.
 export const FILE_EXPIRY_MS = 60 * 60 * 1000
 
+// Human-readable form of FILE_EXPIRY_MS for UI copy, so the messaging can't
+// drift from the actual expiry window (e.g. '1 hour', '24 hours').
+export function fileExpiryLabel() {
+  const hours = Math.round(FILE_EXPIRY_MS / (60 * 60 * 1000))
+  return hours === 1 ? '1 hour' : `${hours} hours`
+}
+
 const AUDIO_RE = /\.(mp3|m4a|ogg|opus|wav|flac)$/i
 
 export function isAudioFile(filename) {

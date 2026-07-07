@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import MoveToCloud from '../components/MoveToCloud'
 import { useHistory } from '../context/useHistory'
 import { useShareLink } from '../hooks/useShareLink'
-import { fileUrl, formatFileSize, mediaKind } from '../lib/media'
+import { fileExpiryLabel, fileUrl, formatFileSize, mediaKind } from '../lib/media'
 
 const FILTERS = [
   { id: 'all', label: 'All' },
@@ -368,8 +368,8 @@ function DownloadsPage() {
         <div>
           <h2 className="font-headline-lg text-headline-lg text-ink mb-2">Your downloads</h2>
           <p className="font-body-md text-body-md text-muted max-w-[52ch]">
-            Files clear from the server after 24 hours. Pin one to keep it, or move it to your
-            Dropbox — expired files can be re-downloaded from the source.
+            Files clear from the server after {fileExpiryLabel()}. Pin one to keep it, or move it to
+            your Dropbox — expired files can be re-downloaded from the source.
           </p>
         </div>
         <div className="flex items-center gap-2 bg-surface-container-low p-1 rounded-lg">
