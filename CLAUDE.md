@@ -52,6 +52,8 @@ A download is **"expired"** when its directory + `metadata.json` still exist but
 
 The hourly cleanup scheduler (`services/cleanup.js`, `MAX_FILE_AGE_HOURS = 24`) *expires* old downloads — it does not hard-delete. The frontend mirrors this with two localStorage keys: `tubekeepHistory` (active) and `tubekeepExpired`.
 
+**Re-download dedupe:** when a download **completes** (`addDownload` in `HistoryContext.jsx`), any older *expired* row for the same source URL is dropped from `tubekeepExpired` **and** hard-deleted server-side (`?permanent=true`) so the mount-time `sync()` can't resurrect it on reload — one current row per source. Only expired rows are matched; active and moved-to-cloud rows are left intact.
+
 ### Backend (`backend/src/`)
 - **`server.js`** — Express entry (helmet with CSP disabled for media + cross-origin resource policy, CORS, morgan), route mounting, static SPA serving, cleanup scheduler bootstrap.
 - **`routes/`** — thin HTTP layer: `info.js`, `download.js` (SSE), `files.js` (range serving + expire/delete).
