@@ -357,8 +357,8 @@ function MovedCard({ download, onForget }) {
 // landed yet.
 function DownloadingCard({ download, onDismiss }) {
   const isAudio = mediaKind(download) === 'audio'
-  const progress = useDownloadProgress(download.downloadId)
-  const pct = Math.round(Math.max(0, Math.min(100, progress)))
+  // Hook returns a rounded 0–100.
+  const pct = useDownloadProgress(download.downloadId)
 
   return (
     <div className="group bg-surface-container-lowest border border-surface-variant rounded-lg p-4 flex flex-col sm:flex-row gap-4 hover:shadow-md transition-shadow">

@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import ProgressBar from '../components/ProgressBar'
 import { useHistory } from '../context/useHistory'
-import { clearStartParams, fetchDownloads, loadStartParams } from '../lib/media'
+import { useDownloadProgress } from '../hooks/useDownloadProgress'
+import { clearStartParams, loadStartParams } from '../lib/media'
 
 function DownloadPage() {
   const { downloadId } = useParams()
   const location = useLocation()
   const navigate = useNavigate()
-  const { apiUrl, addDownload, markFailed, cancelDownload } = useHistory()
+  const { markFailed, cancelDownload } = useHistory()
 
   // Start params (title/thumbnail/type + the "Keep forever" choice) come via
   // router state, recovered from sessionStorage on a reload. They're only used
@@ -21,36 +22,20 @@ function DownloadPage() {
     [stateStart, downloadId],
   )
 
-  const [progress, setProgress] = useState(0)
   const [error, setError] = useState(null)
 
-  useEffect(() => {
-    // Defer side-effect setup to a microtask so React StrictMode's synchronous
-    // double-mount cleanup cancels the duplicate before it runs.
-    let eventSource = null
-    let cancelled = false
-
-    // Reconcile against the file list: if the download is present (and not
-    // expired), adopt it and jump to the player. Used to recover when the SSE
-    // reports "not found"/error but the file actually landed (job swept after
-    // completion, or a transient connection drop).
-    const resolveIfReady = async () => {
-      const all = await fetchDownloads(apiUrl)
-      if (cancelled) return false
-      const found = all.find((d) => d.downloadId === downloadId && !d.expired)
-      if (!found) return false
-      addDownload(found)
+  // Observe the job's SSE (shared with the Downloads-list cards). The hook owns
+  // the connection + file-list reconcile; this page only supplies the terminal
+  // behavior: on completion jump to the player; on a real error surface it and
+  // flip the row to "failed"; on a transport blip show a soft notice (the job
+  // keeps running server-side, so a reload re-attaches).
+  const progress = useDownloadProgress(downloadId, {
+    onComplete: () => {
       clearStartParams(downloadId)
       navigate(`/play/${downloadId}`, { replace: true })
-      return true
-    }
-
-    const fail = (message) => {
-      if (cancelled) return
-      setError(message)
-      // Flip the pending Downloads-list row to "Failed" so it stops spinning and
-      // offers Redownload/Dismiss. Pass the known row fields (undefined without
-      // start params — markFailed updates in place when the row already exists).
+    },
+    onError: (message) => {
+      setError(message || 'Download failed')
       markFailed(downloadId, {
         url: startParams?.url,
         type: startParams?.type,
@@ -58,59 +43,9 @@ function DownloadPage() {
         thumbnail: startParams?.thumbnail,
       })
       clearStartParams(downloadId)
-    }
-
-    const startTimer = setTimeout(() => {
-      // Pure observer: no query params — the job already owns them server-side.
-      eventSource = new EventSource(`${apiUrl}/api/download/progress/${downloadId}`)
-
-      eventSource.onmessage = async (event) => {
-        const data = JSON.parse(event.data)
-        if (data.type === 'ping') return
-        if (data.type === 'progress') {
-          setProgress(data.progress)
-        } else if (data.type === 'complete') {
-          setProgress(100)
-          addDownload(data.data)
-          clearStartParams(downloadId)
-          eventSource.close()
-          navigate(`/play/${downloadId}`, { replace: true })
-        } else if (data.type === 'error') {
-          eventSource.close()
-          // The download may actually have finished (e.g. the job was swept, or
-          // a stale "not found" after a completed download): reconcile against
-          // the file list before declaring failure.
-          try {
-            if (await resolveIfReady()) return
-          } catch {
-            // fall through to the failure state
-          }
-          fail(data.error || 'Download failed')
-        }
-      }
-
-      eventSource.onerror = async () => {
-        eventSource.close()
-        // A transient proxy blip / dropped keep-alive can fire onerror even when
-        // the download finished server-side. Reconcile before declaring failure.
-        try {
-          if (await resolveIfReady()) return
-        } catch {
-          // fall through
-        }
-        // Deliberately do NOT markFailed here (unlike the `error`-event branch):
-        // a transport blip doesn't mean the server-side job died — it keeps
-        // running, and a reload/return re-attaches. Just show a soft notice.
-        if (!cancelled) setError((prev) => prev || 'Download connection lost')
-      }
-    }, 0)
-
-    return () => {
-      clearTimeout(startTimer)
-      cancelled = true
-      if (eventSource) eventSource.close()
-    }
-  }, [apiUrl, downloadId, startParams, addDownload, markFailed, navigate])
+    },
+    onTransportError: () => setError((prev) => prev || 'Download connection lost'),
+  })
 
   if (error) {
     return (
