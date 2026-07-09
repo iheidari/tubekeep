@@ -394,7 +394,7 @@ function DownloadingCard({ download, onDismiss }) {
             <h3 className="font-headline-md text-headline-md text-on-surface truncate pr-4">
               {download.title}
             </h3>
-            <span className="flex items-center gap-1 text-primary font-label-sm text-label-sm whitespace-nowrap bg-primary-container px-2 py-0.5 rounded-full">
+            <span className="flex items-center gap-1 text-on-primary-container font-label-sm text-label-sm whitespace-nowrap bg-primary-container px-2 py-0.5 rounded-full">
               <span
                 className="material-symbols-outlined animate-spin text-[14px]"
                 aria-hidden="true"
