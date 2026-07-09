@@ -203,7 +203,7 @@ completion regardless of any client connection. Over the concurrency cap
 GET /api/download/progress/:downloadId
 ```
 Pure observer: attaches to the running job and streams real-time progress
-(`started` / `progress` / `complete` / `error` + `ping` heartbeats). It does not
+(`progress` / `complete` / `error` + `ping` heartbeats). It does not
 start a download; disconnecting just unsubscribes, and reconnecting re-attaches.
 An unknown id yields a `"download not found"` error.
 

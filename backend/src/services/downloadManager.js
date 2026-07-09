@@ -4,9 +4,9 @@ const { saveDownloadMetadata } = require('../utils/storage');
 
 // In-memory registry of download jobs, keyed by downloadId. A job runs yt-dlp to
 // completion INDEPENDENT of any client SSE connection, so navigating away from
-// the download page no longer aborts it. The SSE endpoint is a pure observer
-// that subscribes to a job's `emitter`. In-memory only: an in-flight download
-// dies on server restart, and a reconnect to an unknown id gets a clear
+// the download page no longer aborts it. Observers attach via subscribe() — the
+// job's `emitter` stays internal to this module. In-memory only: an in-flight
+// download dies on server restart, and a reconnect to an unknown id gets a clear
 // "download not found" (see 0XC-26 "out of scope").
 const jobs = new Map();
 
@@ -43,6 +43,37 @@ function getJob(downloadId) {
   return jobs.get(downloadId) || null;
 }
 
+// Attach an observer to a job. Synchronously replays the job's current state
+// (its terminal outcome, or the latest progress) to the matching callback, then
+// — only while it's still running — subscribes to future events. Returns an
+// unsubscribe function, or `null` if no job exists for the id. Keeping the
+// replay + subscribe atomic *here* (never yielding between them) is what
+// guarantees a terminal event can't slip through the gap; callers must not
+// reach into `job.emitter` and re-implement it.
+function subscribe(downloadId, { onProgress, onComplete, onError }) {
+  const job = jobs.get(downloadId);
+  if (!job) return null;
+
+  if (job.status === 'complete') {
+    onComplete(job.result);
+    return () => {};
+  }
+  if (job.status === 'error') {
+    onError(job.error);
+    return () => {};
+  }
+
+  onProgress(job.progress);
+  job.emitter.on('progress', onProgress);
+  job.emitter.on('complete', onComplete);
+  job.emitter.on('error', onError);
+  return () => {
+    job.emitter.off('progress', onProgress);
+    job.emitter.off('complete', onComplete);
+    job.emitter.off('error', onError);
+  };
+}
+
 // Drive one job's yt-dlp download to completion, relaying progress and the
 // terminal outcome through its emitter. Never throws — the terminal state is
 // captured on the job record so observers (current and future) can read it.
@@ -67,15 +98,17 @@ async function runJob(job) {
       result = await downloadVideo(url, formatId, downloadId, onProgress, false, signal);
     }
 
+    // `type` and `keep` are already normalized by the route before startJob, so
+    // no re-defaulting/coercion is needed here.
     const metadata = {
       url,
       title: title || result.filename,
       thumbnail,
       formatId,
-      type: type || 'video',
+      type,
       filename: result.filename,
       size: result.size,
-      kept: keep === true || keep === 'true',
+      kept: keep,
       createdAt: new Date().toISOString(),
       downloadId,
     };
@@ -172,6 +205,7 @@ function sweepJobs(now = Date.now()) {
 module.exports = {
   startJob,
   getJob,
+  subscribe,
   cancelJob,
   sweepJobs,
   runningCount,

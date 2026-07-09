@@ -66,7 +66,7 @@ function DownloadPage() {
 
       eventSource.onmessage = async (event) => {
         const data = JSON.parse(event.data)
-        if (data.type === 'ping' || data.type === 'started') return
+        if (data.type === 'ping') return
         if (data.type === 'progress') {
           setProgress(data.progress)
         } else if (data.type === 'complete') {

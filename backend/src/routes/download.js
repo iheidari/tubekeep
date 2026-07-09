@@ -3,7 +3,7 @@ const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { isSupportedUrl } = require('../services/ytdlp');
 const { initSSE } = require('../utils/sse');
-const { startJob, getJob, cancelJob, DownloadCapError } = require('../services/downloadManager');
+const { startJob, subscribe, cancelJob, DownloadCapError } = require('../services/downloadManager');
 
 // Start a download job and return its id. POST both mints the id AND starts the
 // job server-side (via the download manager), so the download runs to completion
@@ -60,67 +60,52 @@ router.post('/', (req, res) => {
   });
 });
 
-// Pure observer: attach to an already-running job and stream its progress. This
-// endpoint NEVER spawns a process. Disconnecting only unsubscribes — the job
-// keeps running server-side. An unknown id yields a terminal "download not
-// found" error (e.g. after a server restart) instead of starting a download.
+// Pure observer: attach to an already-running job and stream its progress as SSE
+// frames. This endpoint NEVER spawns a process — it's a thin serializer over the
+// download manager's subscribe() (which owns the replay-then-listen state
+// machine). Disconnecting only unsubscribes; the job keeps running server-side.
+// An unknown id yields a terminal "download not found" error (e.g. after a
+// server restart) instead of starting a download.
 router.get('/progress/:downloadId', (req, res) => {
   const { downloadId } = req.params;
   const sendEvent = initSSE(res);
-  const job = getJob(downloadId);
 
-  if (!job) {
+  let heartbeatInterval = null;
+  const stopHeartbeat = () => {
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  };
+
+  const unsubscribe = subscribe(downloadId, {
+    onProgress: (progress) => sendEvent({ type: 'progress', downloadId, progress }),
+    onComplete: (data) => {
+      sendEvent({ type: 'complete', downloadId, progress: 100, data });
+      stopHeartbeat();
+      res.end();
+    },
+    onError: (error) => {
+      sendEvent({ type: 'error', downloadId, error });
+      stopHeartbeat();
+      res.end();
+    },
+  });
+
+  if (!unsubscribe) {
     sendEvent({ type: 'error', downloadId, error: 'Download not found' });
     return res.end();
   }
 
-  sendEvent({ type: 'started', downloadId, progress: job.progress });
+  // A terminal replay above (job already complete/error) may have already ended
+  // the response — nothing more to stream.
+  if (res.writableEnded) return;
 
-  // Job already finished before this client connected: replay the terminal
-  // event immediately and close.
-  if (job.status === 'complete') {
-    sendEvent({ type: 'complete', downloadId, progress: 100, data: job.result });
-    return res.end();
-  }
-  if (job.status === 'error') {
-    sendEvent({ type: 'error', downloadId, error: job.error });
-    return res.end();
-  }
-
-  // Running: replay the latest known progress, then stream live updates.
-  sendEvent({ type: 'progress', downloadId, progress: job.progress });
-
-  const onProgress = (progress) => sendEvent({ type: 'progress', downloadId, progress });
-  const onComplete = (data) => {
-    sendEvent({ type: 'complete', downloadId, progress: 100, data });
-    cleanup();
-    res.end();
-  };
-  const onError = (message) => {
-    sendEvent({ type: 'error', downloadId, error: message });
-    cleanup();
-    res.end();
-  };
-
-  // Heartbeat to keep proxies from timing out the idle stream (every 15s).
-  const heartbeatInterval = setInterval(() => {
-    sendEvent({ type: 'ping', downloadId, progress: job.progress });
-  }, 15000);
-
-  function cleanup() {
-    clearInterval(heartbeatInterval);
-    job.emitter.off('progress', onProgress);
-    job.emitter.off('complete', onComplete);
-    job.emitter.off('error', onError);
-  }
-
-  job.emitter.on('progress', onProgress);
-  job.emitter.on('complete', onComplete);
-  job.emitter.on('error', onError);
-
-  // Client navigated away / closed the tab: unsubscribe only. The job is NOT
-  // aborted — it runs to completion server-side.
-  req.on('close', cleanup);
+  // Still running: heartbeat to keep proxies from timing out the idle stream,
+  // and unsubscribe (no abort — the job keeps running) when the client leaves.
+  heartbeatInterval = setInterval(() => sendEvent({ type: 'ping', downloadId }), 15000);
+  req.on('close', () => {
+    stopHeartbeat();
+    unsubscribe();
+  });
 });
 
 // Explicit cancel: abort a running job and clean up its partial files (the
