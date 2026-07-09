@@ -51,6 +51,31 @@ export async function fetchDownloads(apiUrl) {
   return data.data
 }
 
+// Server disk usage for the format-screen banner + fit check. Returns null on
+// any failure so the UI degrades to "no banner, nothing blocked" rather than
+// breaking the format list. Shape: { total, free, used, sizeMultiplier,
+// headroomBytes } (bytes + the fit knobs the backend owns).
+export async function fetchDisk(apiUrl) {
+  try {
+    const res = await fetch(`${apiUrl}/api/disk`)
+    const data = await res.json()
+    if (!data.success || !data.data) return null
+    return data.data
+  } catch {
+    return null
+  }
+}
+
+// Whether a download of `filesize` bytes fits within the server's disk margin.
+// The multiplier/headroom come from the /api/disk response (backend-owned) so
+// this can't drift from the backend hard-block. Unknown size, or no disk info
+// yet, is never blocked — mirrors the backend's hasRoomFor.
+export function hasRoomFor(filesize, disk) {
+  if (!filesize || filesize <= 0) return true
+  if (!disk) return true
+  return disk.free >= filesize * disk.sizeMultiplier + disk.headroomBytes
+}
+
 export function formatFileSize(bytes) {
   if (!bytes) return 'Unknown'
   const sizes = ['B', 'KB', 'MB', 'GB']

@@ -35,8 +35,10 @@ No test framework is configured. Linting/formatting is [Biome](https://biomejs.d
 ### Download flow
 1. `GET /api/info?url=...` → `services/ytdlp.js` runs `yt-dlp --dump-json`, returns formats grouped into `{ video, audio, combined }`.
 2. `POST /api/download` → only mints and returns a `downloadId` (a UUID). **No download happens here.**
-3. `GET /api/download/progress/:downloadId?url=...&formatId=...&type=...` → this SSE endpoint is what actually spawns yt-dlp. It streams `started` / `progress` / `complete` / `error` events plus `ping` heartbeats every 15s (for proxy keep-alive), and writes `metadata.json` on completion.
+3. `GET /api/download/progress/:downloadId?url=...&formatId=...&type=...&filesize=...` → this SSE endpoint is what actually spawns yt-dlp. Before spawning it applies a **pre-download disk-space check**: if the client-passed `filesize` (the selected format's bytes) fails the fit margin (`hasRoomFor` in `utils/storage.js`), it emits a clean `error` event and never starts yt-dlp. It streams `started` / `progress` / `complete` / `error` events plus `ping` heartbeats every 15s (for proxy keep-alive), and writes `metadata.json` on completion.
 4. `GET /api/files/:downloadId/:filename` → serves the file with HTTP range support (in-browser seeking/streaming) and RFC 5987 `Content-Disposition` for unicode filenames. `?action=download` forces an attachment.
+
+**Disk-space guard (`GET /api/disk`, `routes/disk.js`):** returns `{ total, free, used }` (bytes, via `fs.promises.statfs(downloadsDir)`) plus the fit knobs `{ sizeMultiplier, headroomBytes }`. The format screen (`FormatSelector`) shows a storage banner and disables any format whose `filesize` fails the margin. The fit math lives once in `utils/storage.js` — `hasRoomFor(free, filesize)` with `free >= filesize * DISK_SIZE_MULTIPLIER (2×) + DISK_HEADROOM_BYTES (500 MB)` — and the frontend reads the same knobs from the `/api/disk` response (`hasRoomFor` in `lib/media.js`) so client disable-check and server backstop can't drift. The `2×` covers the transient video+audio merge; unknown-size formats are never blocked. The client-passed `filesize` is untrusted (a UX guard, not a security boundary).
 
 ### yt-dlp integration (`services/ytdlp.js`) — read before touching downloads
 This file carries deliberate workarounds for YouTube's 2026-era extraction breakage. Do not "simplify" them away:
@@ -58,10 +60,10 @@ The hourly cleanup scheduler (`services/cleanup.js`, `MAX_FILE_AGE_HOURS = 24`) 
 
 ### Backend (`backend/src/`)
 - **`server.js`** — Express entry (helmet with CSP disabled for media + cross-origin resource policy, CORS, morgan), route mounting, static SPA serving, cleanup scheduler bootstrap.
-- **`routes/`** — thin HTTP layer: `info.js`, `download.js` (SSE), `files.js` (range serving + expire/delete).
+- **`routes/`** — thin HTTP layer: `info.js`, `download.js` (SSE), `files.js` (range serving + expire/delete), `disk.js` (`GET /api/disk` — server disk usage + fit knobs).
 - **`services/ytdlp.js`** — all subprocess spawning (see above).
 - **`services/cleanup.js`** — hourly scheduler; also runnable standalone (`npm run cleanup`).
-- **`utils/storage.js`** — the source of truth for the directory layout, `metadata.json` I/O, and `listDownloads`/`expireDownload`/`deleteDownload`.
+- **`utils/storage.js`** — the source of truth for the directory layout, `metadata.json` I/O, `listDownloads`/`expireDownload`/`deleteDownload`, and the disk-space guard (`getDiskUsage`/`hasRoomFor` + the fit constants).
 
 ### Frontend (`frontend/src/`)
 Routing-based, **not** a single mega-component (the old `App.jsx`-holds-all-state model is gone):

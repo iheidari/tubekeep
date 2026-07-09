@@ -2,8 +2,17 @@ const express = require('express');
 const router = express.Router();
 const { v4: uuidv4 } = require('uuid');
 const { downloadVideo, downloadAudio, isSupportedUrl } = require('../services/ytdlp');
-const { saveDownloadMetadata } = require('../utils/storage');
+const { saveDownloadMetadata, getDiskUsage, hasRoomFor } = require('../utils/storage');
 const { initSSE } = require('../utils/sse');
+
+// Human-readable bytes for the disk-full SSE error message. Backend has no
+// shared formatter, and this is the only place that needs one.
+function formatBytes(bytes) {
+  if (!bytes || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  return `${(bytes / 1024 ** i).toFixed(1)} ${units[i]}`;
+}
 
 router.post('/', async (req, res) => {
   const { url, formatId, type } = req.body;
@@ -38,7 +47,7 @@ router.post('/', async (req, res) => {
 
 router.get('/progress/:downloadId', async (req, res) => {
   const { downloadId } = req.params;
-  const { url, formatId, type, title, thumbnail, keep } = req.query;
+  const { url, formatId, type, title, thumbnail, keep, filesize } = req.query;
 
   if (!url || !formatId) {
     return res.status(400).json({
@@ -77,6 +86,30 @@ router.get('/progress/:downloadId', async (req, res) => {
   });
 
   try {
+    // Backstop the client-side disable-check: refuse a download that won't fit
+    // within the disk margin before spawning yt-dlp. `filesize` is the selected
+    // format's byte size (untrusted, UX guard only); unknown/absent size skips
+    // the check, mirroring hasRoomFor. Uses the same fit math as the frontend.
+    const wantBytes = Number.parseInt(filesize, 10);
+    if (Number.isFinite(wantBytes) && wantBytes > 0) {
+      const { free } = await getDiskUsage();
+      if (!hasRoomFor(free, wantBytes)) {
+        finished = true;
+        clearInterval(heartbeatInterval);
+        console.warn(
+          `⚠️  Refusing download ${downloadId}: needs ~${formatBytes(wantBytes * 2)}, ` +
+            `${formatBytes(free)} free`,
+        );
+        sendEvent({
+          type: 'error',
+          downloadId,
+          error: `Not enough disk space — need ~${formatBytes(wantBytes * 2)}, have ${formatBytes(free)} free`,
+        });
+        res.end();
+        return;
+      }
+    }
+
     sendEvent({ type: 'started', downloadId, progress: 0 });
 
     const onProgress = (p) => {

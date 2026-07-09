@@ -143,6 +143,32 @@ function deleteDownload(downloadId) {
   return false;
 }
 
+// Disk-space guard. A download "fits" when free space covers `DISK_SIZE_MULTIPLIER`×
+// its final size plus `DISK_HEADROOM_BYTES` of slack. The 2× covers the transient
+// video+audio merge (both streams sit on disk before muxing to mp4); the headroom
+// is general slack. These knobs are the single source of truth for the fit math —
+// GET /api/disk echoes them so the frontend disable-check uses identical numbers.
+const DISK_SIZE_MULTIPLIER = 2;
+const DISK_HEADROOM_BYTES = 500 * 1024 * 1024;
+
+// Total / free / used bytes for the filesystem holding downloadsDir. `free` is
+// bavail (space available to unprivileged writes), which is what a download can
+// actually use — not bfree (which includes root-reserved blocks).
+async function getDiskUsage() {
+  const stats = await fs.promises.statfs(downloadsDir);
+  const total = stats.blocks * stats.bsize;
+  const free = stats.bavail * stats.bsize;
+  return { total, free, used: total - free };
+}
+
+// True when `free` bytes can hold a download of `filesize` bytes within the
+// margin. Unknown/zero size is always allowed (nothing to compare). Shared with
+// the frontend via the knobs in the /api/disk response, so there's no drift.
+function hasRoomFor(free, filesize) {
+  if (!filesize || filesize <= 0) return true;
+  return free >= filesize * DISK_SIZE_MULTIPLIER + DISK_HEADROOM_BYTES;
+}
+
 function setKept(downloadId, kept) {
   const metadata = getDownloadMetadata(downloadId);
   if (!metadata) return false;
@@ -215,6 +241,10 @@ function cleanupOldDownloads(maxAgeHours = 24) {
 
 module.exports = {
   downloadsDir,
+  DISK_SIZE_MULTIPLIER,
+  DISK_HEADROOM_BYTES,
+  getDiskUsage,
+  hasRoomFor,
   isValidDownloadId,
   saveDownloadMetadata,
   getDownloadMetadata,

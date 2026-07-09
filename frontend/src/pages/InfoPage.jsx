@@ -3,7 +3,7 @@ import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import BackLink from '../components/BackLink'
 import FormatSelector from '../components/FormatSelector'
 import { useHistory } from '../context/useHistory'
-import { saveStartParams } from '../lib/media'
+import { fetchDisk, saveStartParams } from '../lib/media'
 
 function InfoPage() {
   const [searchParams] = useSearchParams()
@@ -15,6 +15,20 @@ function InfoPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [startingFormat, setStartingFormat] = useState(null)
+  const [disk, setDisk] = useState(null)
+
+  // Server disk usage powers the banner + the oversized-format disable check.
+  // Fetched independently of the slow yt-dlp info call so the format list isn't
+  // held up; a null result just hides the banner and blocks nothing.
+  useEffect(() => {
+    let cancelled = false
+    fetchDisk(apiUrl).then((d) => {
+      if (!cancelled) setDisk(d)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [apiUrl])
 
   useEffect(() => {
     if (!url) return
@@ -45,7 +59,7 @@ function InfoPage() {
 
   if (!url) return <Navigate to="/" replace />
 
-  const handleDownload = async (formatId, type, keep) => {
+  const handleDownload = async (formatId, type, keep, filesize) => {
     setStartingFormat(formatId)
     setError(null)
     try {
@@ -66,6 +80,9 @@ function InfoPage() {
         title: info.title,
         thumbnail: info.thumbnail,
         keep,
+        // Carried through to the SSE progress endpoint so the backend can
+        // backstop the disk-space check before spawning yt-dlp.
+        filesize,
       }
       // Persist per-tab so a reload of the download page can resume the SSE
       // (and keep the "Keep forever" choice) instead of losing router state.
@@ -125,7 +142,14 @@ function InfoPage() {
 
   if (!info) return null
 
-  return <FormatSelector info={info} onDownload={handleDownload} startingFormat={startingFormat} />
+  return (
+    <FormatSelector
+      info={info}
+      onDownload={handleDownload}
+      startingFormat={startingFormat}
+      disk={disk}
+    />
+  )
 }
 
 export default InfoPage

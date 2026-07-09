@@ -16,6 +16,7 @@ const infoRoutes = require('./routes/info');
 const downloadRoutes = require('./routes/download');
 const filesRoutes = require('./routes/files');
 const cloudRoutes = require('./routes/cloud');
+const diskRoutes = require('./routes/disk');
 const { startCleanupScheduler } = require('./services/cleanup');
 const { downloadsDir } = require('./utils/storage');
 const { rateLimit } = require('./utils/rateLimit');
@@ -108,6 +109,7 @@ app.use('/api', (_req, res, next) => {
 app.use('/api/info', rateLimit({ windowMs: 60_000, max: 30 }), infoRoutes);
 app.use('/api/download', rateLimit({ windowMs: 60_000, max: 40 }), downloadRoutes);
 app.use('/api/files', filesRoutes);
+app.use('/api/disk', rateLimit({ windowMs: 60_000, max: 60 }), diskRoutes);
 // OAuth exchange + upload kick-off talk to a provider; throttle per-IP. The SSE
 // progress stream shares this generous window (60/min absorbs reconnects).
 app.use('/api/cloud', rateLimit({ windowMs: 60_000, max: 60 }), cloudRoutes);

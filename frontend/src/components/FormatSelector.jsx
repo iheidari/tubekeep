@@ -1,9 +1,11 @@
 import { useState } from 'react'
-import { formatDuration, formatFileSize } from '../lib/media'
+import { formatDuration, formatFileSize, hasRoomFor } from '../lib/media'
 import BackLink from './BackLink'
 
-function FormatSelector({ info, onDownload, startingFormat = null }) {
+function FormatSelector({ info, onDownload, startingFormat = null, disk = null }) {
   const [keep, setKeep] = useState(false)
+
+  const usedPct = disk?.total ? Math.min(100, Math.round((disk.used / disk.total) * 100)) : 0
 
   const getHeight = (res) => {
     if (!res) return 0
@@ -163,6 +165,26 @@ function FormatSelector({ info, onDownload, startingFormat = null }) {
         </span>
       </button>
 
+      {/* Server storage banner — used/free space, drives the disable check below */}
+      {disk ? (
+        <div className="mb-stack-md bg-surface border border-line rounded-xl px-4 py-3.5">
+          <div className="flex items-center gap-2.5 mb-2 flex-wrap">
+            <span className="material-symbols-outlined text-ink text-[20px]">hard_drive</span>
+            <p className="font-semibold text-[13.5px] text-ink">Server storage</p>
+            <p className="ml-auto text-[12.5px] text-muted">
+              {formatFileSize(disk.free)} free of {formatFileSize(disk.total)} ·{' '}
+              {formatFileSize(disk.used)} used
+            </p>
+          </div>
+          <div className="h-1.5 w-full rounded-full bg-line2 overflow-hidden">
+            <div
+              className={`h-full rounded-full ${usedPct >= 90 ? 'bg-pop' : 'bg-fill'}`}
+              style={{ width: `${usedPct}%` }}
+            />
+          </div>
+        </div>
+      ) : null}
+
       {/* Options Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-stack-lg">
         {/* Video Options */}
@@ -179,6 +201,7 @@ function FormatSelector({ info, onDownload, startingFormat = null }) {
                 const h = getHeight(format.resolution)
                 const isStarting = startingFormat === format.formatId
                 const isBest = idx === 0
+                const fits = hasRoomFor(format.filesize, disk)
                 return (
                   <div
                     key={format.formatId}
@@ -205,12 +228,20 @@ function FormatSelector({ info, onDownload, startingFormat = null }) {
                             </>
                           ) : null}
                         </p>
+                        {!fits ? (
+                          <p className="text-[11.5px] text-error font-semibold mt-0.5">
+                            Not enough space
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                     <button
                       type="button"
-                      onClick={() => onDownload(format.formatId, format._type, keep)}
-                      disabled={startingFormat !== null}
+                      onClick={() =>
+                        onDownload(format.formatId, format._type, keep, format.filesize)
+                      }
+                      disabled={startingFormat !== null || !fits}
+                      title={fits ? undefined : 'Not enough server disk space for this format'}
                       className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-[9px] font-semibold text-[12.5px] active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 flex-shrink-0 ${
                         isBest
                           ? 'bg-fill text-on-fill'
@@ -247,6 +278,7 @@ function FormatSelector({ info, onDownload, startingFormat = null }) {
                 const isStarting = startingFormat === format.formatId
                 const isBest = idx === 0
                 const abr = Math.round(format.abr || 0)
+                const fits = hasRoomFor(format.filesize, disk)
                 return (
                   <div
                     key={format.formatId}
@@ -273,12 +305,18 @@ function FormatSelector({ info, onDownload, startingFormat = null }) {
                             </>
                           ) : null}
                         </p>
+                        {!fits ? (
+                          <p className="text-[11.5px] text-error font-semibold mt-0.5">
+                            Not enough space
+                          </p>
+                        ) : null}
                       </div>
                     </div>
                     <button
                       type="button"
-                      onClick={() => onDownload(format.formatId, 'audio', keep)}
-                      disabled={startingFormat !== null}
+                      onClick={() => onDownload(format.formatId, 'audio', keep, format.filesize)}
+                      disabled={startingFormat !== null || !fits}
+                      title={fits ? undefined : 'Not enough server disk space for this format'}
                       className="flex items-center gap-1.5 bg-surface text-ink border border-ink px-3.5 py-2.5 rounded-[9px] font-semibold text-[12.5px] hover:bg-tint active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 flex-shrink-0"
                     >
                       <span

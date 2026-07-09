@@ -55,6 +55,9 @@ function DownloadPage() {
           title: startParams.title || '',
           thumbnail: startParams.thumbnail || '',
           keep: startParams.keep ? 'true' : 'false',
+          // Lets the backend backstop the disk-space check before spawning
+          // yt-dlp; omitted/empty when the format's size is unknown.
+          filesize: startParams.filesize ? String(startParams.filesize) : '',
         })
 
         eventSource = new EventSource(
