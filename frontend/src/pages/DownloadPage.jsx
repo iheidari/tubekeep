@@ -75,8 +75,15 @@ function DownloadPage() {
           } else if (data.type === 'error') {
             setError(data.error || 'Download failed')
             // Flip the pending Downloads-list row to "Failed" so it stops
-            // spinning and offers Redownload/Dismiss instead.
-            markFailed(downloadId, startParams)
+            // spinning and offers Redownload/Dismiss instead. Pass only the
+            // row fields (not the whole startParams) so the fallback-insert
+            // path produces the same row shape startPending writes.
+            markFailed(downloadId, {
+              url: startParams.url,
+              type: startParams.type,
+              title: startParams.title,
+              thumbnail: startParams.thumbnail,
+            })
             clearStartParams(downloadId)
             eventSource.close()
           }
