@@ -169,7 +169,9 @@ function FormatSelector({ info, onDownload, startingFormat = null, disk = null }
       {disk ? (
         <div className="mb-stack-md bg-surface border border-line rounded-xl px-4 py-3.5">
           <div className="flex items-center gap-2.5 mb-2 flex-wrap">
-            <span className="material-symbols-outlined text-ink text-[20px]">hard_drive</span>
+            <span className="material-symbols-outlined text-ink text-[20px]" aria-hidden="true">
+              hard_drive
+            </span>
             <p className="font-semibold text-[13.5px] text-ink">Server storage</p>
             <p className="ml-auto text-[12.5px] text-muted">
               {formatFileSize(disk.free)} free of {formatFileSize(disk.total)} ·{' '}
@@ -229,7 +231,10 @@ function FormatSelector({ info, onDownload, startingFormat = null, disk = null }
                           ) : null}
                         </p>
                         {!fits ? (
-                          <p className="text-[11.5px] text-error font-semibold mt-0.5">
+                          <p
+                            id={`nospace-${format.formatId}`}
+                            className="text-[11.5px] text-error font-semibold mt-0.5"
+                          >
                             Not enough space
                           </p>
                         ) : null}
@@ -241,6 +246,7 @@ function FormatSelector({ info, onDownload, startingFormat = null, disk = null }
                         onDownload(format.formatId, format._type, keep, format.filesize)
                       }
                       disabled={startingFormat !== null || !fits}
+                      aria-describedby={fits ? undefined : `nospace-${format.formatId}`}
                       title={fits ? undefined : 'Not enough server disk space for this format'}
                       className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-[9px] font-semibold text-[12.5px] active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 flex-shrink-0 ${
                         isBest
@@ -306,7 +312,10 @@ function FormatSelector({ info, onDownload, startingFormat = null, disk = null }
                           ) : null}
                         </p>
                         {!fits ? (
-                          <p className="text-[11.5px] text-error font-semibold mt-0.5">
+                          <p
+                            id={`nospace-${format.formatId}`}
+                            className="text-[11.5px] text-error font-semibold mt-0.5"
+                          >
                             Not enough space
                           </p>
                         ) : null}
@@ -316,6 +325,7 @@ function FormatSelector({ info, onDownload, startingFormat = null, disk = null }
                       type="button"
                       onClick={() => onDownload(format.formatId, 'audio', keep, format.filesize)}
                       disabled={startingFormat !== null || !fits}
+                      aria-describedby={fits ? undefined : `nospace-${format.formatId}`}
                       title={fits ? undefined : 'Not enough server disk space for this format'}
                       className="flex items-center gap-1.5 bg-surface text-ink border border-ink px-3.5 py-2.5 rounded-[9px] font-semibold text-[12.5px] hover:bg-tint active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 flex-shrink-0"
                     >
