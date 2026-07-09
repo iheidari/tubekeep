@@ -237,20 +237,45 @@ function describeDownloadedFile(downloadPath, downloadId, extensions, notFoundMe
   };
 }
 
+// Fraction of the progress bar allotted to the video sub-stream of a merged
+// download; the remainder covers the audio sub-stream. Video is the larger,
+// slower half, so it owns most of the bar. See `weightMerge` below.
+const VIDEO_PHASE_WEIGHT = 0.9;
+
 // Run a download, retrying the transient SABR/format failures YouTube throws
 // mid-session. `label` only tags the retry log line ("Video"/"Audio").
-async function runDownloadWithRetry(args, onProgress, label, signal) {
+// `weightMerge` folds a two-sub-stream merged download into one monotonic bar
+// (see below); leave it false for single-stream (audio-only / pre-merged).
+async function runDownloadWithRetry(args, onProgress, label, signal, weightMerge = false) {
   for (let attempt = 1; attempt <= 3; attempt++) {
     if (signal?.aborted) throw new Error('Download aborted');
     try {
+      // A merged video download runs ONE yt-dlp process that pulls the video
+      // sub-stream (0→100%) then the audio sub-stream (0→100%) before merging,
+      // so the raw percentage resets from ~100 back to ~0 at the boundary —
+      // the client would otherwise see the bar fill, snap back, and fill again.
+      // When `weightMerge`, detect that reset and remap each sub-stream into a
+      // slice of a single 0→100 bar (video 0–90%, audio 90–100%) so progress
+      // only ever moves forward.
+      let phase = 1;
+      let lastPct = -1;
       await runYtDlp(args, {
         signal,
         // Downloads get the generous cap, not the short metadata default.
         timeout: DOWNLOAD_TIMEOUT_MS,
         onProgress: (line) => {
           const match = line.match(/(\d+\.?\d*)%/);
-          if (match && onProgress) {
-            onProgress(parseFloat(match[1]));
+          if (!match || !onProgress) return;
+          const pct = Number.parseFloat(match[1]);
+          // A drop of >30 points means yt-dlp started the next sub-stream.
+          if (lastPct - pct > 30) phase++;
+          lastPct = pct;
+          if (!weightMerge) {
+            onProgress(pct);
+          } else if (phase === 1) {
+            onProgress(pct * VIDEO_PHASE_WEIGHT);
+          } else {
+            onProgress(VIDEO_PHASE_WEIGHT * 100 + pct * (1 - VIDEO_PHASE_WEIGHT));
           }
         },
       });
@@ -294,6 +319,10 @@ async function downloadVideo(
       outputTemplate,
       '--newline',
       '--progress',
+      // Pull several fragments at once for fragmented (HLS/DASH) streams — a
+      // 2–4× speedup on transfer-bound downloads. No-op on single-URL streams.
+      '--concurrent-fragments',
+      '4',
       '--no-playlist',
     ];
 
@@ -304,7 +333,9 @@ async function downloadVideo(
 
     args.push(url);
 
-    await runDownloadWithRetry(args, onProgress, 'Video', signal);
+    // Only the merge path has two sub-streams to fold into one bar; a
+    // pre-merged (combined) format is a single stream — report it straight.
+    await runDownloadWithRetry(args, onProgress, 'Video', signal, mergeWithAudio);
 
     return describeDownloadedFile(
       downloadPath,
@@ -338,6 +369,8 @@ async function downloadAudio(url, formatId, downloadId, onProgress, signal) {
         outputTemplate,
         '--newline',
         '--progress',
+        '--concurrent-fragments',
+        '4',
         '--no-playlist',
         url,
       ],
