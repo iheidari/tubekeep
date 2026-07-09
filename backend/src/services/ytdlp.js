@@ -20,6 +20,14 @@ const ytDlpEnv = {
 console.log(`🔧 Using yt-dlp binary: ${ytDlpBin}`);
 console.log(`🔧 Node.js for yt-dlp: ${process.execPath}`);
 
+// yt-dlp subprocess timeouts. A metadata dump should return quickly — a hung one
+// is a failure. Downloads legitimately run for many minutes (a large HLS video is
+// thousands of small fragments), so they get a far more generous cap — but still a
+// finite one, so a genuinely wedged yt-dlp is eventually reaped instead of leaking
+// a process and its pipes forever.
+const METADATA_TIMEOUT_MS = 2 * 60 * 1000;
+const DOWNLOAD_TIMEOUT_MS = 60 * 60 * 1000;
+
 // YouTube's default web/tv clients require JS challenge solving that's currently
 // broken in yt-dlp 2026.02.x, returning only a single 360p combined format and
 // hanging mid-download. `android_vr` bypasses both issues — full quality ladder
@@ -43,11 +51,12 @@ function isSupportedUrl(value) {
 
 function runYtDlp(args, options = {}) {
   return new Promise((resolve, reject) => {
-    const ytDlp = spawn(ytDlpBin, args, {
-      timeout: options.timeout || 120000,
+    const ytDlp = spawn(options.binary || ytDlpBin, args, {
+      // `binary` is a test-injection seam; production always uses ytDlpBin.
+      // `??` (not `||`) so an explicit `timeout: 0` can disable the cap entirely.
+      timeout: options.timeout ?? METADATA_TIMEOUT_MS,
       env: ytDlpEnv,
       signal: options.signal,
-      ...options.spawnOptions,
     });
 
     let stdout = '';
@@ -69,11 +78,17 @@ function runYtDlp(args, options = {}) {
       stderr += data.toString();
     });
 
-    ytDlp.on('close', (code) => {
-      if (code !== 0 && code !== null) {
-        reject(new Error(`yt-dlp exited with code ${code}: ${stderr || stdout}`));
-      } else {
+    ytDlp.on('close', (code, signal) => {
+      if (code === 0) {
         resolve({ stdout, stderr });
+      } else if (signal) {
+        // Killed by a signal — the spawn timeout, a client-disconnect abort, or
+        // the OS. A half-written download is NOT a success: reject so the caller
+        // surfaces a real error instead of hunting for a file that was never
+        // finished ("Downloaded file not found").
+        reject(new Error(`yt-dlp was terminated by ${signal}: ${stderr || stdout}`));
+      } else {
+        reject(new Error(`yt-dlp exited with code ${code}: ${stderr || stdout}`));
       }
     });
 
@@ -230,6 +245,8 @@ async function runDownloadWithRetry(args, onProgress, label, signal) {
     try {
       await runYtDlp(args, {
         signal,
+        // Downloads get the generous cap, not the short metadata default.
+        timeout: DOWNLOAD_TIMEOUT_MS,
         onProgress: (line) => {
           const match = line.match(/(\d+\.?\d*)%/);
           if (match && onProgress) {
@@ -346,4 +363,5 @@ module.exports = {
   downloadVideo,
   downloadAudio,
   isSupportedUrl,
+  runYtDlp,
 };
