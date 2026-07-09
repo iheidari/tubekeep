@@ -368,13 +368,19 @@ function DownloadingCard({ download }) {
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
-            <span className="material-symbols-outlined text-on-surface-variant text-[40px]">
+            <span
+              className="material-symbols-outlined text-on-surface-variant text-[40px]"
+              aria-hidden="true"
+            >
               {isAudio ? 'music_note' : 'movie'}
             </span>
           </div>
         )}
         <div className="absolute inset-0 bg-background/40 flex items-center justify-center">
-          <span className="material-symbols-outlined animate-spin text-white text-[40px]">
+          <span
+            className="material-symbols-outlined animate-spin text-white text-[40px]"
+            aria-hidden="true"
+          >
             progress_activity
           </span>
         </div>
@@ -387,7 +393,10 @@ function DownloadingCard({ download }) {
               {download.title}
             </h3>
             <span className="flex items-center gap-1 text-primary font-label-sm text-label-sm whitespace-nowrap bg-primary-container px-2 py-0.5 rounded-full">
-              <span className="material-symbols-outlined animate-spin text-[14px]">
+              <span
+                className="material-symbols-outlined animate-spin text-[14px]"
+                aria-hidden="true"
+              >
                 progress_activity
               </span>
               Downloading…
@@ -409,7 +418,9 @@ function DownloadingCard({ download }) {
         </div>
 
         <p className="font-label-sm text-label-sm text-primary mt-4 flex items-center gap-1">
-          <span className="material-symbols-outlined text-[18px]">open_in_full</span>
+          <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+            open_in_full
+          </span>
           Tap to watch progress
         </p>
       </div>
@@ -433,13 +444,18 @@ function FailedCard({ download, onDismiss }) {
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
-            <span className="material-symbols-outlined text-on-surface-variant/50 text-[40px]">
+            <span
+              className="material-symbols-outlined text-on-surface-variant/50 text-[40px]"
+              aria-hidden="true"
+            >
               {isAudio ? 'music_note' : 'movie'}
             </span>
           </div>
         )}
         <div className="absolute inset-0 bg-background/40 flex items-center justify-center">
-          <span className="material-symbols-outlined text-error text-[40px]">error</span>
+          <span className="material-symbols-outlined text-error text-[40px]" aria-hidden="true">
+            error
+          </span>
         </div>
       </div>
 
@@ -450,7 +466,9 @@ function FailedCard({ download, onDismiss }) {
               {download.title}
             </h3>
             <span className="flex items-center gap-1 text-on-error-container font-label-sm text-label-sm whitespace-nowrap bg-error-container px-2 py-0.5 rounded-full">
-              <span className="material-symbols-outlined text-[14px]">error_outline</span>
+              <span className="material-symbols-outlined text-[14px]" aria-hidden="true">
+                error_outline
+              </span>
               Failed
             </span>
           </div>
@@ -477,8 +495,11 @@ function FailedCard({ download, onDismiss }) {
             onClick={() => onDismiss(download.downloadId)}
             className="p-2 text-on-surface-variant hover:text-error hover:bg-error-container/20 transition-all rounded-full"
             title="Dismiss"
+            aria-label="Dismiss failed download"
           >
-            <span className="material-symbols-outlined">delete</span>
+            <span className="material-symbols-outlined" aria-hidden="true">
+              delete
+            </span>
           </button>
         </div>
       </div>
