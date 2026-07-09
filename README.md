@@ -155,6 +155,7 @@ Create `.env` files in the respective directories:
 PORT=3001
 FRONTEND_URL=http://localhost:5173
 NODE_ENV=development
+MAX_CONCURRENT_DOWNLOADS=3   # max simultaneous downloads (over the cap → HTTP 429)
 ```
 
 **frontend/.env:**
@@ -189,15 +190,28 @@ Content-Type: application/json
   "formatId": "22",
   "type": "combined",
   "title": "Video Title",
-  "thumbnail": "https://..."
+  "thumbnail": "https://...",
+  "keep": false
 }
 ```
+Mints a `downloadId` **and starts the download server-side** — it runs to
+completion regardless of any client connection. Over the concurrency cap
+(`MAX_CONCURRENT_DOWNLOADS`, default 3) it returns **HTTP 429**.
 
 ### Download Progress (SSE)
 ```
-GET /api/download/progress/:downloadId?url=...&formatId=...&type=...
+GET /api/download/progress/:downloadId
 ```
-Stream real-time download progress.
+Pure observer: attaches to the running job and streams real-time progress
+(`started` / `progress` / `complete` / `error` + `ping` heartbeats). It does not
+start a download; disconnecting just unsubscribes, and reconnecting re-attaches.
+An unknown id yields a `"download not found"` error.
+
+### Cancel Download
+```
+DELETE /api/download/:downloadId
+```
+Aborts a running download job and removes its partial files.
 
 ### List Downloads
 ```
