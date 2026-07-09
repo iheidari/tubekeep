@@ -254,7 +254,6 @@ function FormatSelector({ info, onDownload, startingFormat = null, disk = null }
                       }
                       disabled={startingFormat !== null || !fits}
                       aria-describedby={fits ? undefined : noSpaceId(format.formatId)}
-                      title={fits ? undefined : 'Not enough server disk space for this format'}
                       className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-[9px] font-semibold text-[12.5px] active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 flex-shrink-0 ${
                         isBest
                           ? 'bg-fill text-on-fill'
@@ -326,7 +325,6 @@ function FormatSelector({ info, onDownload, startingFormat = null, disk = null }
                       onClick={() => onDownload(format.formatId, 'audio', keep, format.filesize)}
                       disabled={startingFormat !== null || !fits}
                       aria-describedby={fits ? undefined : noSpaceId(format.formatId)}
-                      title={fits ? undefined : 'Not enough server disk space for this format'}
                       className="flex items-center gap-1.5 bg-surface text-ink border border-ink px-3.5 py-2.5 rounded-[9px] font-semibold text-[12.5px] hover:bg-tint active:scale-95 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 flex-shrink-0"
                     >
                       <span

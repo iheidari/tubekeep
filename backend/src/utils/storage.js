@@ -161,12 +161,19 @@ async function getDiskUsage() {
   return { total, free, used: total - free };
 }
 
+// Bytes of free space a download of `filesize` needs to clear the margin.
+// Unknown/zero size needs nothing. Sole definition of the fit threshold, so the
+// guard and any "need ~X" message read from the same number.
+function requiredBytesFor(filesize) {
+  if (!filesize || filesize <= 0) return 0;
+  return filesize * DISK_SIZE_MULTIPLIER + DISK_HEADROOM_BYTES;
+}
+
 // True when `free` bytes can hold a download of `filesize` bytes within the
 // margin. Unknown/zero size is always allowed (nothing to compare). Shared with
 // the frontend via the knobs in the /api/disk response, so there's no drift.
 function hasRoomFor(free, filesize) {
-  if (!filesize || filesize <= 0) return true;
-  return free >= filesize * DISK_SIZE_MULTIPLIER + DISK_HEADROOM_BYTES;
+  return free >= requiredBytesFor(filesize);
 }
 
 function setKept(downloadId, kept) {
@@ -245,6 +252,7 @@ module.exports = {
   DISK_HEADROOM_BYTES,
   getDiskUsage,
   hasRoomFor,
+  requiredBytesFor,
   isValidDownloadId,
   saveDownloadMetadata,
   getDownloadMetadata,

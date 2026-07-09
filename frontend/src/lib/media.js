@@ -78,8 +78,10 @@ export function hasRoomFor(filesize, disk) {
 
 export function formatFileSize(bytes) {
   if (!bytes) return 'Unknown'
-  const sizes = ['B', 'KB', 'MB', 'GB']
-  const i = Math.floor(Math.log(bytes) / Math.log(1024))
+  // Clamp the unit index: the disk banner feeds whole-disk (multi-TB) sizes, so
+  // TB/PB must exist and a value past the table can't fall off the end.
+  const sizes = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
+  const i = Math.min(sizes.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)))
   return `${(bytes / 1024 ** i).toFixed(2)} ${sizes[i]}`
 }
 

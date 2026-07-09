@@ -6,7 +6,7 @@ const {
   saveDownloadMetadata,
   getDiskUsage,
   hasRoomFor,
-  DISK_SIZE_MULTIPLIER,
+  requiredBytesFor,
 } = require('../utils/storage');
 const { initSSE } = require('../utils/sse');
 
@@ -95,15 +95,23 @@ router.get('/progress/:downloadId', async (req, res) => {
     // within the disk margin before spawning yt-dlp. `filesize` is the selected
     // format's byte size (untrusted, UX guard only); unknown/absent size skips
     // the check, mirroring hasRoomFor. Uses the same fit math as the frontend.
+    // The guard is fail-open: if reading disk usage errors, we let the download
+    // proceed rather than block it (this is UX, not a security boundary, and the
+    // frontend degrades the same way when /api/disk fails).
     const wantBytes = Number.parseInt(filesize, 10);
     if (Number.isFinite(wantBytes) && wantBytes > 0) {
-      const { free } = await getDiskUsage();
-      if (!hasRoomFor(free, wantBytes)) {
+      let free = null;
+      try {
+        ({ free } = await getDiskUsage());
+      } catch (diskErr) {
+        console.warn(`⚠️  Disk-space check skipped for ${downloadId}: ${diskErr.message}`);
+      }
+      if (free !== null && !hasRoomFor(free, wantBytes)) {
         finished = true;
         clearInterval(heartbeatInterval);
-        // Report the margined requirement (same multiplier hasRoomFor uses) so
-        // the "need ~X" figure can't drift from the actual fit check.
-        const needBytes = wantBytes * DISK_SIZE_MULTIPLIER;
+        // Report the margined requirement straight from the fit math so the
+        // "need ~X" figure can't drift from the actual check (incl. headroom).
+        const needBytes = requiredBytesFor(wantBytes);
         console.warn(
           `⚠️  Refusing download ${downloadId}: needs ~${formatBytes(needBytes)}, ` +
             `${formatBytes(free)} free`,
