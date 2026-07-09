@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import MoveToCloud from '../components/MoveToCloud'
 import { useHistory } from '../context/useHistory'
+import { useDownloadProgress } from '../hooks/useDownloadProgress'
 import { useShareLink } from '../hooks/useShareLink'
 import { fileExpiryLabel, fileUrl, formatFileSize, mediaKind } from '../lib/media'
 
@@ -350,11 +351,14 @@ function MovedCard({ download, onForget }) {
 
 // A download that's still running (placeholder row written at click time). The
 // thumbnail + "Watch progress" both link to /download/:id so the user can watch
-// live progress; a Dismiss drops the row locally (the download is abandoned if
-// the user navigated away — the server aborts it on disconnect). No
-// play/download/move actions, since no file has landed yet.
+// live progress. The download runs server-side regardless of the client, so
+// Dismiss actively cancels the job (aborts it + removes partial files) rather
+// than merely hiding the row. No play/download/move actions, since no file has
+// landed yet.
 function DownloadingCard({ download, onDismiss }) {
   const isAudio = mediaKind(download) === 'audio'
+  // Hook returns a rounded 0–100.
+  const pct = useDownloadProgress(download.downloadId)
 
   return (
     <div className="group bg-surface-container-lowest border border-surface-variant rounded-lg p-4 flex flex-col sm:flex-row gap-4 hover:shadow-md transition-shadow">
@@ -415,6 +419,24 @@ function DownloadingCard({ download, onDismiss }) {
             </span>
             <span className="text-on-surface-variant/60 font-label-sm text-label-sm">
               Started {formatRelative(download.createdAt)}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 mt-3">
+            <div
+              role="progressbar"
+              aria-valuenow={pct}
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-label="Download progress"
+              className="h-1.5 flex-grow rounded-full bg-surface-variant overflow-hidden"
+            >
+              <div
+                className="h-full bg-primary rounded-full transition-[width] duration-300"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+            <span className="font-label-sm text-label-sm text-on-surface-variant tabular-nums">
+              {pct}%
             </span>
           </div>
         </div>
@@ -535,6 +557,7 @@ function DownloadsPage() {
     setKept,
     forgetMoved,
     dropLocal,
+    cancelDownload,
   } = useHistory()
   const [filter, setFilter] = useState('all')
 
@@ -595,7 +618,9 @@ function DownloadsPage() {
               return <MovedCard key={item.downloadId} download={item} onForget={forgetMoved} />
             }
             if (item.status === 'downloading') {
-              return <DownloadingCard key={item.downloadId} download={item} onDismiss={dropLocal} />
+              return (
+                <DownloadingCard key={item.downloadId} download={item} onDismiss={cancelDownload} />
+              )
             }
             if (item.status === 'failed') {
               return <FailedCard key={item.downloadId} download={item} onDismiss={dropLocal} />

@@ -14,6 +14,11 @@ function InfoPage() {
   const [info, setInfo] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  // Non-fatal error surfaced when starting a download fails (e.g. the server is
+  // at its concurrency cap → HTTP 429). Shown as a dismissable inline banner
+  // above the format list so the user can retry, unlike `error` which replaces
+  // the whole page for a failed info fetch.
+  const [startError, setStartError] = useState(null)
   const [startingFormat, setStartingFormat] = useState(null)
   const [disk, setDisk] = useState(null)
 
@@ -62,11 +67,24 @@ function InfoPage() {
   const handleDownload = async (formatId, type, keep, filesize) => {
     setStartingFormat(formatId)
     setError(null)
+    setStartError(null)
     try {
+      // POST now starts the job server-side, so it carries every parameter the
+      // backend needs to run + persist the download (the SSE is a pure observer
+      // and no longer receives them on its query string). `filesize` lets the
+      // backend backstop the disk-space check before starting the job.
       const response = await fetch(`${apiUrl}/api/download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: info.originalUrl, formatId, type }),
+        body: JSON.stringify({
+          url: info.originalUrl,
+          formatId,
+          type,
+          title: info.title,
+          thumbnail: info.thumbnail,
+          keep,
+          filesize,
+        }),
       })
       const data = await response.json()
       if (!data.success) throw new Error(data.error)
@@ -80,9 +98,6 @@ function InfoPage() {
         title: info.title,
         thumbnail: info.thumbnail,
         keep,
-        // Carried through to the SSE progress endpoint so the backend can
-        // backstop the disk-space check before spawning yt-dlp.
-        filesize,
       }
       // Persist per-tab so a reload of the download page can resume the SSE
       // (and keep the "Keep forever" choice) instead of losing router state.
@@ -100,7 +115,9 @@ function InfoPage() {
       })
       navigate(`/download/${downloadId}`, { replace: true, state: startState })
     } catch (err) {
-      setError(err.message || 'Failed to start download')
+      // Keep the format list up (unlike the fatal info-fetch `error`) so the
+      // user can retry — the common case is a transient 429 "server busy".
+      setStartError(err.message || 'Failed to start download')
       setStartingFormat(null)
     }
   }
@@ -143,12 +160,37 @@ function InfoPage() {
   if (!info) return null
 
   return (
-    <FormatSelector
-      info={info}
-      onDownload={handleDownload}
-      startingFormat={startingFormat}
-      disk={disk}
-    />
+    <>
+      {startError && (
+        <div className="max-w-4xl mx-auto mb-stack-sm">
+          <div
+            role="alert"
+            className="flex items-start gap-3 bg-error-container border border-error/40 rounded-xl px-4 py-3"
+          >
+            <span className="material-symbols-outlined text-error text-[20px]" aria-hidden="true">
+              error
+            </span>
+            <p className="flex-1 font-body-md text-body-md text-on-error-container">{startError}</p>
+            <button
+              type="button"
+              onClick={() => setStartError(null)}
+              className="p-1 text-on-error-container/70 hover:text-on-error-container rounded-full transition-colors"
+              aria-label="Dismiss error"
+            >
+              <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+                close
+              </span>
+            </button>
+          </div>
+        </div>
+      )}
+      <FormatSelector
+        info={info}
+        onDownload={handleDownload}
+        startingFormat={startingFormat}
+        disk={disk}
+      />
+    </>
   )
 }
 

@@ -1,4 +1,5 @@
 const { cleanupOldDownloads } = require('../utils/storage');
+const { sweepJobs } = require('./downloadManager');
 
 const CLEANUP_INTERVAL_HOURS = 1;
 // Downloads are a transfer, not storage: a visitor either moves a file to their
@@ -44,6 +45,13 @@ function runCleanup() {
 
   if (result.errors.length > 0) {
     console.error('⚠️ Cleanup errors:', result.errors);
+  }
+
+  // Prune terminal (complete/error) download-job records the manager retains for
+  // reconnects, so a long-lived process doesn't accumulate them.
+  const prunedJobs = sweepJobs();
+  if (prunedJobs > 0) {
+    console.log(`🧹 Pruned ${prunedJobs} finished download job(s)`);
   }
 
   return result;

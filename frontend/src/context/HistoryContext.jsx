@@ -168,6 +168,19 @@ export function HistoryProvider({ children }) {
     setHistory((prev) => prev.filter((d) => d.downloadId !== downloadId))
   }, [])
 
+  // Cancel an in-flight download: since the job now runs server-side regardless
+  // of the client connection, a running download must be explicitly stopped.
+  // DELETE aborts the job and removes its partial files; then drop the row
+  // locally (fire-and-forget — the row goes either way).
+  const cancelDownload = useCallback(async (downloadId) => {
+    try {
+      await fetch(`${HISTORY_API_URL}/api/download/${downloadId}`, { method: 'DELETE' })
+    } catch (err) {
+      console.error('❌ Cancel error:', err)
+    }
+    setHistory((prev) => prev.filter((d) => d.downloadId !== downloadId))
+  }, [])
+
   const removeDownload = useCallback(async (downloadId) => {
     try {
       await fetch(`${HISTORY_API_URL}/api/files/${downloadId}`, { method: 'DELETE' })
@@ -240,6 +253,7 @@ export function HistoryProvider({ children }) {
       startPending,
       markFailed,
       dropLocal,
+      cancelDownload,
       removeDownload,
       forgetExpired,
       setKept,
@@ -254,6 +268,7 @@ export function HistoryProvider({ children }) {
       startPending,
       markFailed,
       dropLocal,
+      cancelDownload,
       removeDownload,
       forgetExpired,
       setKept,
