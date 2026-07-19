@@ -1,4 +1,4 @@
-# Cloud Upload ("Move to Dropbox") — Design & Next Steps
+# Cloud Upload ("Move to cloud") — Design & Next Steps
 
 > Status: **implemented** for **Dropbox and Google Drive**. This document is the agreed design
 > from the design interview; OneDrive remains a fast-follow. See "Implementation" below for where
@@ -115,17 +115,28 @@ server → hand to the visitor's cloud → forget.
 ---
 
 ## New env vars
+Each provider is independent — configure any subset; a provider appears in the menu only
+when all of its required creds are set. See `backend/.env.example` / `frontend/.env.example`
+for the full list.
 ```
 # backend/.env
 DROPBOX_APP_KEY=...
 DROPBOX_APP_SECRET=...
 DROPBOX_REDIRECT_URI=https://<host>/oauth/callback   # exact match; add localhost for dev
 
-# frontend/.env
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_REDIRECT_URI=https://<host>/oauth/callback    # exact match; add localhost for dev
+GOOGLE_DRIVE_FOLDER=Tubekeep                          # optional; default "Tubekeep"
+
+# frontend/.env  (optional — only to OVERRIDE the values the backend publishes)
 VITE_DROPBOX_APP_KEY=...          # public app key for the popup/PKCE
 VITE_DROPBOX_REDIRECT_URI=...     # exact-match redirect URI
+VITE_GOOGLE_CLIENT_ID=...         # public client id for the popup/PKCE
+VITE_GOOGLE_REDIRECT_URI=...      # exact-match redirect URI
 ```
-See **[dropbox-setup.md](./dropbox-setup.md)** for how to obtain these.
+See **[dropbox-setup.md](./dropbox-setup.md)** and **[googledrive-setup.md](./googledrive-setup.md)**
+for how to obtain these.
 
 ---
 
@@ -164,7 +175,8 @@ See **[dropbox-setup.md](./dropbox-setup.md)** for how to obtain these.
 ## Out of scope (parked)
 - **Subscription / retention tier:** paid users get files stored *by us* with a
   user-defined retention period. Future feature, not this change.
-- **OneDrive, Google Drive, Box, pCloud, WebDAV, S3** connectors (roadmap above).
+- **OneDrive, Box, pCloud, WebDAV, S3** connectors (roadmap above). *(Google Drive shipped —
+  see Implementation.)*
 
 ## Future hardening (make it stronger)
 - Optional **real auth** / accounts for users who want "connect once, remembered."
