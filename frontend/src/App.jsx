@@ -37,9 +37,9 @@ function App() {
             </NavLink>
             <span className="w-px h-5 bg-line mx-1.5" aria-hidden="true" />
             <ThemeToggle />
+            <span className="w-px h-5 bg-line mx-1.5" aria-hidden="true" />
             {user ? (
               <>
-                <span className="w-px h-5 bg-line mx-1.5" aria-hidden="true" />
                 <span
                   className="font-label-md text-[13.5px] text-muted max-w-[14ch] truncate"
                   title={user.email}
@@ -58,15 +58,12 @@ function App() {
                 </button>
               </>
             ) : (
-              <>
-                <span className="w-px h-5 bg-line mx-1.5" aria-hidden="true" />
-                <Link
-                  to="/login"
-                  className="font-label-md text-[13.5px] text-muted hover:text-ink transition-colors px-3 py-2 rounded-lg"
-                >
-                  Log in
-                </Link>
-              </>
+              <Link
+                to="/login"
+                className="font-label-md text-[13.5px] text-muted hover:text-ink transition-colors px-3 py-2 rounded-lg"
+              >
+                Log in
+              </Link>
             )}
           </div>
         </div>
