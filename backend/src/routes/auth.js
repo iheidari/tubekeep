@@ -3,6 +3,7 @@ const {
   requestMagicLink,
   verifyMagicLink,
   signSession,
+  appUrl,
   SESSION_COOKIE,
   SESSION_TTL_SECONDS,
 } = require('../services/authService');
@@ -21,10 +22,6 @@ function sessionCookieOptions() {
     secure: isProd,
     path: '/',
   };
-}
-
-function appUrl() {
-  return (process.env.APP_URL || 'http://localhost:3001').replace(/\/+$/, '');
 }
 
 // Build the auth router. `store` and `mailer` are injected so the whole router

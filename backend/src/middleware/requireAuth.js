@@ -8,17 +8,20 @@
 const { verifySession, SESSION_COOKIE } = require('../services/authService');
 
 function createRequireAuth(store) {
+  const unauthorized = (res) =>
+    res.status(401).json({ success: false, error: 'Authentication required' });
+
   return async function requireAuth(req, res, next) {
     const token = req.cookies?.[SESSION_COOKIE];
     const payload = verifySession(token);
     if (!payload) {
-      return res.status(401).json({ success: false, error: 'Authentication required' });
+      return unauthorized(res);
     }
 
     try {
       const user = await store.findUserById(payload.sub);
       if (!user) {
-        return res.status(401).json({ success: false, error: 'Authentication required' });
+        return unauthorized(res);
       }
       req.user = {
         user_id: user.id,

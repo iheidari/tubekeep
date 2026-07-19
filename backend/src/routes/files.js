@@ -30,26 +30,10 @@ function getContentDisposition(filename, isDownload) {
   return `${dispositionType}; filename="${asciiFilename}"; filename*=UTF-8''${encodedFilename}`;
 }
 
-// The download LIST is private (it reflects the server's stored downloads);
-// only the byte-range SERVE route below stays public so Share/`/play/:id` links
-// keep working for anyone.
-router.get('/', requireAuth, (_req, res) => {
-  try {
-    const downloads = listDownloads();
-    res.json({
-      success: true,
-      data: downloads,
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
-  }
-});
-
-// PUBLIC: byte-range media serving. Intentionally has no auth gate so shared
-// `/play/:id` links play for recipients who never logged in (see 0XC-97).
+// PUBLIC: byte-range media serving. Declared FIRST, above the requireAuth choke
+// below, so it stays reachable without a session — shared `/play/:id` links play
+// for recipients who never logged in (see 0XC-97). Every route defined after the
+// choke is private by default, so a new route can't accidentally leak.
 router.get('/:downloadId/:filename', (req, res) => {
   const { downloadId, filename } = req.params;
   const { action } = req.query;
@@ -152,7 +136,28 @@ router.get('/:downloadId/:filename', (req, res) => {
   }
 });
 
-router.patch('/:downloadId', requireAuth, (req, res) => {
+// Everything below requires a session. Gating at the router here (rather than
+// per-route) makes private the default: any route added after this line is
+// auth-gated automatically, and only the public serve route above is exempt.
+router.use(requireAuth);
+
+// The download LIST is private — it reflects the server's stored downloads.
+router.get('/', (_req, res) => {
+  try {
+    const downloads = listDownloads();
+    res.json({
+      success: true,
+      data: downloads,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+router.patch('/:downloadId', (req, res) => {
   const { downloadId } = req.params;
   const kept = req.query.kept === 'true';
 
@@ -177,7 +182,7 @@ router.patch('/:downloadId', requireAuth, (req, res) => {
   }
 });
 
-router.delete('/:downloadId', requireAuth, (req, res) => {
+router.delete('/:downloadId', (req, res) => {
   const { downloadId } = req.params;
   const permanent = req.query.permanent === 'true';
 

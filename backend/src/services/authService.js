@@ -15,6 +15,13 @@ function getJwtSecret() {
   return secret;
 }
 
+// The app's public base URL (no trailing slash). Single source of truth so the
+// emailed magic link (mailer) and the post-login redirect (auth router) can't
+// drift onto different origins.
+function appUrl() {
+  return (process.env.APP_URL || 'http://localhost:3001').replace(/\/+$/, '');
+}
+
 // Raw token the user receives in the link; the hash is what we store.
 function generateToken() {
   return crypto.randomBytes(32).toString('base64url');
@@ -76,6 +83,7 @@ module.exports = {
   TOKEN_TTL_MS,
   SESSION_TTL_SECONDS,
   SESSION_COOKIE,
+  appUrl,
   generateToken,
   hashToken,
   signSession,

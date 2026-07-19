@@ -4,13 +4,12 @@
 //
 // The Resend SDK is required lazily so importing this module never fails when
 // the dependency's transitive env expectations aren't met in a bare test run.
-const APP_URL = () => process.env.APP_URL || 'http://localhost:3001';
+const { appUrl } = require('./authService');
 
 // Build the clickable verify URL the user receives. Points at the backend's
 // verify route, which sets the session cookie and redirects into the app.
 function buildMagicLink(rawToken) {
-  const base = APP_URL().replace(/\/+$/, '');
-  return `${base}/api/auth/verify?token=${encodeURIComponent(rawToken)}`;
+  return `${appUrl()}/api/auth/verify?token=${encodeURIComponent(rawToken)}`;
 }
 
 function renderEmail(link) {
