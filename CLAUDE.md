@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Ticket management
+
+Tickets live in Linear under the **Tubekeep** project (team **0xCode**, key `0XC`).
+
 ## Commands
 
 ```bash
