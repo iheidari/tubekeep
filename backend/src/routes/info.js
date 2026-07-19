@@ -20,7 +20,8 @@ router.get('/', async (req, res) => {
       data: info,
     });
   } catch (error) {
-    console.error('Error fetching video info:', error);
+    // getVideoInfo already logged the raw stderr for operators; error.message is
+    // now friendly user-facing copy (see utils/friendlyError.js), so don't re-log it.
     res.status(500).json({
       success: false,
       error: error.message,

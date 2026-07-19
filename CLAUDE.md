@@ -72,6 +72,7 @@ The hourly cleanup scheduler (`services/cleanup.js`, `MAX_FILE_AGE_HOURS = 24`) 
 - **`services/downloadManager.js`** — in-memory job registry that runs downloads to completion decoupled from the client SSE; enforces `MAX_CONCURRENT_DOWNLOADS` (see Download flow).
 - **`services/cleanup.js`** — hourly scheduler; also runnable standalone (`npm run cleanup`). Also prunes finished download-job records (`sweepJobs`).
 - **`utils/storage.js`** — the source of truth for the directory layout, `metadata.json` I/O, `listDownloads`/`expireDownload`/`deleteDownload`, and the disk-space guard (`getDiskUsage`/`hasRoomFor` + the fit constants).
+- **`utils/friendlyError.js`** — `friendlyYtDlpError(rawMessage)`: maps raw yt-dlp stderr to short, blame-free user copy via an ordered `{ pattern, message }` list (unavailable/removed, private, members-only, age-restricted, geo-blocked, live/premiere, unsupported URL, network/timeout), falling back to a generic message. Matches lowercased substrings anywhere in multi-line stderr, most-specific first. `getVideoInfo`'s catch and `downloadManager`'s `runJob` error path both run every user-facing error through it, so `/api/info` and SSE `error` never leak exit codes, extractor tags, or enforcement-vendor names. The **full raw stderr is still `console.error`-logged** server-side for operators — only the user-facing string is rewritten.
 
 ### Frontend (`frontend/src/`)
 Routing-based, **not** a single mega-component (the old `App.jsx`-holds-all-state model is gone):

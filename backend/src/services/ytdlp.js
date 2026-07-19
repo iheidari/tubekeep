@@ -2,6 +2,7 @@ const { spawn } = require('node:child_process');
 const path = require('node:path');
 const fs = require('node:fs');
 const { ensureDownloadDir, deleteDownload } = require('../utils/storage');
+const { friendlyYtDlpError } = require('../utils/friendlyError');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -199,7 +200,11 @@ async function getVideoInfo(url) {
       chapters: info.chapters || [],
     };
   } catch (error) {
-    throw new Error(`Failed to get video info: ${error.message}`);
+    // Log the full raw stderr for operators, but hand the user friendly copy —
+    // yt-dlp's raw message leaks exit codes, extractor tags, and enforcement
+    // vendor names (see 0XC-95).
+    console.error(`❌ Fetch error for ${url}:`, error.message);
+    throw new Error(friendlyYtDlpError(error.message));
   }
 }
 
