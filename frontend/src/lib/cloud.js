@@ -83,7 +83,7 @@ function resolveConfig(name, serverEntry) {
 }
 
 // Fetch the list of enabled, known providers with their resolved config. Cached
-// for the tab. Returns [{ name, label, icon, clientId, redirectUri }].
+// for the tab on success. Returns [{ name, label, icon, clientId, redirectUri }].
 export function getEnabledProviders() {
   if (!providersPromise) {
     providersPromise = fetch(`${API_URL}/api/cloud/providers`)
@@ -95,7 +95,12 @@ export function getEnabledProviders() {
           .map((name) => resolveConfig(name, byName.get(name)))
           .filter(Boolean)
       })
-      .catch(() => [])
+      .catch(() => {
+        // Don't cache a transient failure — that would hide "Move to cloud" for
+        // the whole tab until reload. Clear it so the next call retries.
+        providersPromise = null
+        return []
+      })
   }
   return providersPromise
 }

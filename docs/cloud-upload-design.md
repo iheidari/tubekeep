@@ -58,7 +58,7 @@ server → hand to the visitor's cloud → forget.
   S3-compatible (B2/R2/Wasabi) — these use pasted credentials/keys, not per-visitor OAuth, so
   they do **not** fit the OAuth interface. Do not contort the OAuth interface for them.
 - All OAuth providers behind one `CloudProvider` interface:
-  `getAuthUrl`, `exchangeCode`, `refresh`, `resumableUpload`.
+  `isEnabled`, `getPublicConfig`, `exchangeCode`, `refresh`, `upload` (the shipped shape).
 
 ### Dropbox specifics
 - **App-folder permission model** (not full Dropbox). Files land in `/Apps/Tubekeep/`. No folder
@@ -153,7 +153,8 @@ for how to obtain these.
   - `services/cloud/index.js` — provider registry (`getProvider`, `listEnabledProviders`).
   - `services/cloud/jobs.js` — in-memory job manager: concurrency cap (3), queue, per-job
     EventEmitter, hard TTL (30m), token cleared the instant a job settles. On success calls
-    `deleteDownload()`.
+    `markMoved()` (keeps the metadata row + cloud link, drops the local media) — **not** the
+    hard-delete "Model A" sketched in the design section above; that was never shipped.
   - `routes/cloud.js` — `GET /providers`, `POST /oauth/token`, `POST /oauth/refresh`,
     `POST /upload` (token in body → jobId), `GET /upload/:jobId/progress` (SSE). Mounted at
     `/api/cloud` with per-IP rate limiting.

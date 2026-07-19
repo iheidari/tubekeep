@@ -137,7 +137,12 @@ async function withRetry(fn, { signal }) {
     try {
       return await fn();
     } catch (err) {
-      if (err instanceof CloudError && err.code === 'aborted') throw err;
+      // A cancelled upload is terminal — surface it immediately as a classified
+      // CloudError rather than retrying the raw fetch AbortError (a DOMException
+      // with no `.status`, which would otherwise look transient).
+      if (signal?.aborted || err?.name === 'AbortError' || err?.code === 'aborted') {
+        throw err instanceof CloudError ? err : new CloudError('aborted', 'Upload cancelled');
+      }
       const status = err?.status;
       const transient = !status || status >= 500; // no status → network throw
       lastErr = err;
@@ -148,8 +153,7 @@ async function withRetry(fn, { signal }) {
   throw lastErr;
 }
 
-// Find the app's "Tubekeep" folder in My Drive, creating it if absent. Under
-// drive.file we only ever see folders we created, so this resolves to ours.
+// Find the app's "Tubekeep" folder in My Drive, creating it if absent.
 async function findOrCreateFolder(accessToken, signal) {
   const auth = { Authorization: `Bearer ${accessToken}` };
   const q = `name='${DRIVE_FOLDER}' and mimeType='${FOLDER_MIME}' and trashed=false`;
@@ -190,9 +194,11 @@ async function startSession({ accessToken, fileName, total, folderId, signal }) 
   return location;
 }
 
-// PUT one chunk to the resumable session. Returns { done, file }: `done` is
-// true on the terminal 200/201 (carrying the file resource); false on a 308
-// "resume incomplete". Throws a classified CloudError otherwise.
+// PUT one chunk to the resumable session. Returns { done, file, nextOffset }:
+// `done` is true on the terminal 200/201 (carrying the file resource); on a 308
+// "resume incomplete" it's false and `nextOffset` is the byte Drive wants next
+// (parsed from the Range header), or null when Drive reports no stored bytes.
+// Throws a classified CloudError otherwise.
 async function putChunk({ sessionUri, chunk, range, signal }) {
   const res = await fetch(sessionUri, {
     method: 'PUT',
@@ -200,9 +206,14 @@ async function putChunk({ sessionUri, chunk, range, signal }) {
     body: chunk,
     signal,
   });
-  if (res.status === 308) return { done: false };
   if (res.ok) return { done: true, file: await res.json().catch(() => ({})) };
-  await driveError(res);
+  if (res.status === 308) {
+    // Range: bytes=0-<last> reports the last byte Drive has stored, so we resume
+    // from there — a partial-confirmation would otherwise desync the next range.
+    const match = res.headers.get('range')?.match(/bytes=0-(\d+)/);
+    return { done: false, nextOffset: match ? Number(match[1]) + 1 : null };
+  }
+  throw await driveError(res);
 }
 
 // Upload a single file to the Tubekeep folder, streaming from disk in
@@ -233,21 +244,30 @@ async function upload({ accessToken, filePath, fileName, size, onProgress, signa
     do {
       if (signal?.aborted) throw new CloudError('aborted', 'Upload cancelled');
       const { bytesRead } = await handle.read(buffer, 0, CHUNK_SIZE, offset);
+      // total > 0 with nothing left to read means the file shrank under us
+      // (truncated/removed after its size was measured) — bail instead of
+      // spinning on `bytes */total` status queries until the job's hard TTL.
+      if (bytesRead === 0 && total > 0 && offset < total) {
+        throw new CloudError('upload', 'File is shorter than expected — it may have been removed.');
+      }
       const chunk = buffer.subarray(0, bytesRead);
       const end = offset + bytesRead; // exclusive
       const range = bytesRead === 0 ? `bytes */${total}` : `bytes ${offset}-${end - 1}/${total}`;
 
-      const { done, file: uploaded } = await withRetry(
-        () => putChunk({ sessionUri, chunk, range, signal }),
-        { signal },
-      );
+      const {
+        done,
+        file: uploaded,
+        nextOffset,
+      } = await withRetry(() => putChunk({ sessionUri, chunk, range, signal }), { signal });
 
-      offset = end;
       if (done) {
         file = uploaded;
         report(total);
         break;
       }
+      // Resume from the byte Drive confirmed when it reported one, else assume
+      // the whole chunk landed.
+      offset = nextOffset ?? end;
       report(offset);
     } while (offset < total);
   } finally {
