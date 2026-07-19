@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useHistory } from '../context/useHistory'
 import { connect, getEnabledProviders, getFreshAccessToken } from '../lib/cloud'
-import { API_URL } from '../lib/media'
+import { API_URL, apiFetch } from '../lib/media'
 
 // Drives a single download's "Move to cloud" flow for any enabled provider:
 // lazy connect (popup) → POST /api/cloud/upload (token in body) → SSE progress
@@ -56,7 +56,7 @@ export function useCloudMove(download, { onMoved } = {}) {
         }
 
         setPhase('starting')
-        const res = await fetch(`${API_URL}/api/cloud/upload`, {
+        const res = await apiFetch(`${API_URL}/api/cloud/upload`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -68,7 +68,11 @@ export function useCloudMove(download, { onMoved } = {}) {
         const body = await res.json()
         if (!body.success) throw new Error(body.error || 'Failed to start upload')
 
-        const es = new EventSource(`${API_URL}/api/cloud/upload/${body.data.jobId}/progress`)
+        // withCredentials so the session cookie rides the SSE (this route is
+        // behind requireAuth); harmless same-origin.
+        const es = new EventSource(`${API_URL}/api/cloud/upload/${body.data.jobId}/progress`, {
+          withCredentials: true,
+        })
         esRef.current = es
 
         es.onmessage = (event) => {

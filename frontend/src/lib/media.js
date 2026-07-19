@@ -6,6 +6,26 @@
 export const API_URL =
   import.meta.env.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin : '')
 
+// Window event the API layer broadcasts when a protected call returns 401 (the
+// magic-link session is missing/expired). The AuthProvider listens for it to
+// drop the current user so the route gate bounces to /login. Kept as a plain
+// string here (no React import) so both this lib and the context can share it.
+export const AUTH_UNAUTHORIZED_EVENT = 'tk:unauthorized'
+
+// Credentialed fetch for our own API. The session is an httpOnly cookie, so
+// every call must send credentials — this is the single place that guarantees
+// it. On a 401 it broadcasts AUTH_UNAUTHORIZED_EVENT (session expired) and still
+// returns the response so callers keep their existing error handling. Lives in
+// lib (not React) so any module — context, hooks, pages — can route through it.
+export function apiFetch(input, init = {}) {
+  return fetch(input, { credentials: 'include', ...init }).then((res) => {
+    if (res.status === 401 && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(AUTH_UNAUTHORIZED_EVENT))
+    }
+    return res
+  })
+}
+
 // How long a file lives on our server before it's expired (mirrors the backend
 // MAX_FILE_AGE_HOURS in services/cleanup.js). Exposed so the UI can gate
 // time-sensitive actions — e.g. don't start a cloud move that would race the
@@ -45,7 +65,7 @@ export function formatDuration(seconds, fallback = '') {
 // Single place that talks to GET /api/files. Returns the raw download array
 // (or [] on any failure), so callers don't each re-implement the fetch/guard.
 export async function fetchDownloads(apiUrl) {
-  const res = await fetch(`${apiUrl}/api/files`)
+  const res = await apiFetch(`${apiUrl}/api/files`)
   const data = await res.json()
   if (!data.success || !Array.isArray(data.data)) return []
   return data.data
@@ -57,7 +77,7 @@ export async function fetchDownloads(apiUrl) {
 // headroomBytes } (bytes + the fit knobs the backend owns).
 export async function fetchDisk(apiUrl) {
   try {
-    const res = await fetch(`${apiUrl}/api/disk`)
+    const res = await apiFetch(`${apiUrl}/api/disk`)
     const data = await res.json()
     if (!data.success || !data.data) return null
     return data.data

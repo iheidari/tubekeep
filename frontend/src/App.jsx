@@ -1,17 +1,25 @@
-import { Link, NavLink, Outlet } from 'react-router-dom'
+import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom'
 import './App.css'
 import Logo from './components/Logo'
 import PlayerDock from './components/PlayerDock'
 import ThemeToggle from './components/ThemeToggle'
+import { useAuth } from './context/useAuth'
 import { usePlayer } from './context/usePlayer'
 
 function App() {
   const { current, stageActive } = usePlayer()
+  const { user, logout } = useAuth()
+  const navigate = useNavigate()
   const dockVisible = !!current && !stageActive
   const navLinkClass = ({ isActive }) =>
     `font-label-md text-[13.5px] transition-colors px-3 py-2 rounded-lg ${
       isActive ? 'text-ink' : 'text-muted hover:text-ink'
     }`
+
+  const handleLogout = async () => {
+    await logout()
+    navigate('/login')
+  }
 
   return (
     <div className="flex flex-col min-h-screen bg-bg text-ink">
@@ -29,6 +37,37 @@ function App() {
             </NavLink>
             <span className="w-px h-5 bg-line mx-1.5" aria-hidden="true" />
             <ThemeToggle />
+            {user ? (
+              <>
+                <span className="w-px h-5 bg-line mx-1.5" aria-hidden="true" />
+                <span
+                  className="font-label-md text-[13.5px] text-muted max-w-[14ch] truncate"
+                  title={user.email}
+                >
+                  {user.name || user.email}
+                </span>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="font-label-md text-[13.5px] text-muted hover:text-ink transition-colors px-3 py-2 rounded-lg inline-flex items-center gap-1"
+                >
+                  <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+                    logout
+                  </span>
+                  Logout
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="w-px h-5 bg-line mx-1.5" aria-hidden="true" />
+                <Link
+                  to="/login"
+                  className="font-label-md text-[13.5px] text-muted hover:text-ink transition-colors px-3 py-2 rounded-lg"
+                >
+                  Log in
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </header>

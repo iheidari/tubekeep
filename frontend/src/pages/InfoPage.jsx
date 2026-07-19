@@ -3,7 +3,7 @@ import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import BackLink from '../components/BackLink'
 import FormatSelector from '../components/FormatSelector'
 import { useHistory } from '../context/useHistory'
-import { fetchDisk, saveStartParams } from '../lib/media'
+import { apiFetch, fetchDisk, saveStartParams } from '../lib/media'
 
 function InfoPage() {
   const [searchParams] = useSearchParams()
@@ -42,7 +42,7 @@ function InfoPage() {
     setError(null)
     setInfo(null)
 
-    fetch(`${apiUrl}/api/info?url=${encodeURIComponent(url)}`)
+    apiFetch(`${apiUrl}/api/info?url=${encodeURIComponent(url)}`)
       .then((r) => r.json())
       .then((data) => {
         if (cancelled) return
@@ -73,7 +73,7 @@ function InfoPage() {
       // backend needs to run + persist the download (the SSE is a pure observer
       // and no longer receives them on its query string). `filesize` lets the
       // backend backstop the disk-space check before starting the job.
-      const response = await fetch(`${apiUrl}/api/download`, {
+      const response = await apiFetch(`${apiUrl}/api/download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
