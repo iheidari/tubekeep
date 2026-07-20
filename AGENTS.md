@@ -239,7 +239,8 @@ This repo has agent skills installed in `.agents/skills/`:
 
 ## Important Notes
 
-- Downloads are stored in `backend/downloads/` and auto-deleted after 24 hours
+- Media files are stored in `backend/downloads/` and auto-expired after 1 hour (`MAX_FILE_AGE_HOURS`)
+- Download history lives in the Postgres `downloads` table, scoped to the session's user; each account has a storage quota (`users.max_storage_bytes`, default 5 GB, `-1` = unlimited) enforced at `POST /api/download`
 - Uses Server-Sent Events (SSE) for real-time download progress
 - CORS is pinned to `FRONTEND_URL` with credentials enabled (never a wildcard)
 - Auth is an emailed single-use magic link → JWT httpOnly cookie session; users are a closed, hand-managed set in the Neon `users` table (no signup). All API routes require a session except the public `GET /api/files/:id/:filename` media route

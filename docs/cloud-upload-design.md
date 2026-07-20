@@ -47,6 +47,10 @@ server → hand to the visitor's cloud → forget.
   the moment a file is moved. This is intentional under Model A.
 - The "moved" history row lives **only in the browser's localStorage** (the server keeps no
   record after delete). Row shows a **"Open in Dropbox"** affordance.
+  > **Superseded (0XC-100).** History is now server-side, per user: the move flags the
+  > `downloads` row `moved = true` with the provider link in `moved_info`, and the media
+  > directory keeps its `metadata.json` (`markMoved`) rather than being hard-deleted. A
+  > moved row stops counting against the user's storage quota.
 
 ### Providers
 - **v1: Dropbox only.** Fastest path to the exact security model (PKCE public client, browser
@@ -165,7 +169,8 @@ for how to obtain these.
     `/api/cloud/providers` (VITE_ vars optional overrides).
   - `pages/OAuthCallbackPage.jsx` + `/oauth/callback` route (standalone, outside the app shell).
   - `hooks/useCloudMove.js` + `components/MoveToCloud.jsx` — the button/progress/fallback UI.
-  - `context/HistoryContext.jsx` — `markMoved`/`dropLocal`; sync preserves moved rows locally.
+  - `context/HistoryContext.jsx` — `markMoved`/`forgetMoved`. (As of 0XC-100 the server owns the
+    moved flag; the provider only mirrors it, and `dropLocal` is gone.)
   - Wired into `DownloadsPage` (active cards + a `MovedCard`) and `PlayPage`.
 - **Known follow-up (not yet done):** the hourly cleanup (`MAX_FILE_AGE_HOURS = 1`) does not yet
   exempt an in-flight move. A move of a file already near the 1h mark could have its source
