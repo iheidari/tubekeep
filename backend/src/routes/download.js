@@ -22,6 +22,35 @@ function formatBytes(bytes) {
   return `${(bytes / 1024 ** i).toFixed(1)} ${units[i]}`;
 }
 
+// One row per source URL (0XC-10). When a download completes, drop the user's
+// older rows for the same URL and remove their media, so a re-download replaces
+// the stale entry instead of sitting next to it — and the old copy stops
+// occupying the quota. Moved-to-cloud and still-downloading rows are spared by
+// the store's supersede rule.
+//
+// This lives in the job's completion hook, NOT in the browser: downloads finish
+// server-side whether or not a client is watching the SSE (0XC-25/0XC-26), and
+// the original client-side dedupe silently did nothing whenever the user left
+// the download page — which is the normal flow.
+//
+// Best-effort by design: `runHook` already isolates hook failures so a DB or
+// filesystem blip can never turn a finished download into a failed one. The
+// hourly sweep reconciles anything left behind.
+async function supersedeOlderRows(store, { downloadId, userId, url }) {
+  const superseded = await store.supersedeForUser({ downloadId, userId, url });
+  for (const id of superseded) {
+    try {
+      deleteDownload(id);
+    } catch (err) {
+      console.error(`⚠️  Could not remove superseded media ${id}: ${err.message}`);
+    }
+  }
+  if (superseded.length > 0) {
+    console.log(`🧹 Superseded ${superseded.length} older download(s) for ${url}`);
+  }
+  return superseded;
+}
+
 // Build the download router. The per-user history store is injected (server.js
 // builds one over the shared pg pool) so the routes stay unit-testable against
 // createMemoryStore() without Postgres — same pattern as the files/auth routers.
@@ -158,11 +187,16 @@ function createDownloadRouter({ store, start = startJob }) {
         {
           // Terminal outcomes land on the user's row. `result.size` is the real
           // on-disk size, replacing the client's estimate for quota accounting.
-          onComplete: (result) =>
-            store.markComplete(downloadId, {
+          onComplete: async (result) => {
+            await store.markComplete(downloadId, {
               filename: result.filename,
               filesize: result.size,
-            }),
+            });
+            // Only now that this download has actually landed does it replace
+            // the user's older rows for the same URL — an abandoned or failed
+            // re-download must leave the existing one intact.
+            await supersedeOlderRows(store, { downloadId, userId, url });
+          },
           onError: () => store.markFailed(downloadId),
         },
       );

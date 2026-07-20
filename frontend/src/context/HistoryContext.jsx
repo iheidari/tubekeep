@@ -23,6 +23,19 @@ function decorate(d) {
 
 const byNewest = (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
 
+// Does the freshly-completed download `fresh` replace the existing row `row`?
+// One row per source URL (0XC-10). The SERVER owns this rule — it runs in the
+// download job's completion hook, so it applies even when no tab is watching the
+// SSE. This mirror exists only so the list updates instantly instead of waiting
+// for the next sync; it issues no requests. Keep the two spared cases in step
+// with the store's supersedeForUser: a moved-to-cloud row still links to a live
+// cloud copy, and a `downloading` row belongs to a concurrent job.
+function supersededBy(fresh, row) {
+  if (row.downloadId === fresh.downloadId) return false
+  if (!fresh.url || row.url !== fresh.url) return false
+  return !row.moved && row.status !== 'downloading'
+}
+
 // Hard-delete a download's server-side row (media included). Used when the
 // visitor permanently forgets an expired, moved, or failed card.
 async function forgetOnServer(downloadId) {
@@ -52,15 +65,10 @@ export function HistoryProvider({ children }) {
   const [history, setHistory] = useState([])
   const [expired, setExpired] = useState([])
   const historyRef = useRef(history)
-  const expiredRef = useRef(expired)
 
   useEffect(() => {
     historyRef.current = history
   }, [history])
-
-  useEffect(() => {
-    expiredRef.current = expired
-  }, [expired])
 
   useEffect(clearLegacyStorage, [])
 
@@ -114,23 +122,9 @@ export function HistoryProvider({ children }) {
     const decorated = decorate(download)
     setHistory((prev) => {
       const without = prev.filter((d) => d.downloadId !== decorated.downloadId)
-      return [decorated, ...without]
+      return [decorated, ...without].filter((d) => !supersededBy(decorated, d))
     })
-    if (decorated.url) {
-      // A completed re-download supersedes any older expired row for the same
-      // source URL. Compute that stale set once, then (a) best-effort hard-delete
-      // it server-side so the next sync won't resurrect it, and (b) drop it
-      // locally. The delete is fire-and-forget, so a failed request can still let
-      // the row reappear on the next sync. The downloadId guard keeps us from
-      // deleting the freshly-completed row itself. Moved-to-cloud rows live in
-      // `history`, not `expired`, so they are left untouched.
-      const stale = expiredRef.current.filter(
-        (d) => d.url === decorated.url && d.downloadId !== decorated.downloadId,
-      )
-      for (const d of stale) forgetOnServer(d.downloadId)
-      const staleIds = new Set(stale.map((d) => d.downloadId))
-      setExpired((prev) => prev.filter((d) => !staleIds.has(d.downloadId)))
-    }
+    setExpired((prev) => prev.filter((d) => !supersededBy(decorated, d)))
   }, [])
 
   // Show a "Downloading…" row the moment a download starts. The server already

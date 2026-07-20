@@ -40,6 +40,7 @@ before(async () => {
         deleteForUser: (...a) => store.deleteForUser(...a),
         markComplete: (...a) => store.markComplete(...a),
         markFailed: (...a) => store.markFailed(...a),
+        supersedeForUser: (...a) => store.supersedeForUser(...a),
       },
       start: (params, hooks) => startImpl(params, hooks),
     }),
@@ -188,4 +189,67 @@ test('cancelling an unknown download id is 404', async () => {
 
   assert.equal(res.status, 404);
   assert.equal((await res.json()).error, 'Download not found');
+});
+
+// --- 0XC-10: a completed download supersedes older rows for the same URL -----
+// The regression these cover: the dedupe used to live in the browser and only
+// ran if a tab happened to witness the SSE `complete` event. Downloads finish
+// server-side whether or not anyone is watching, so these drive the job's
+// completion hook directly — no client, no SSE.
+
+const SRC = 'https://example.com/watch?v=abc';
+
+// Seed a completed download for `userId` at `url`, bypassing the route.
+async function seedAt(id, userId, url, patch = {}) {
+  await store.insert({ downloadId: id, userId, url, type: 'video', filesize: 100 });
+  await store.markComplete(id, { filename: `${id}.mp4`, filesize: 100 });
+  Object.assign(store._rows.get(id), patch);
+}
+
+// Run the started job's completion hook, as the download manager does.
+function finish(job, filename = 'fresh.mp4') {
+  return job.hooks.onComplete({ filename, size: 4242 });
+}
+
+test('completing a download removes the user’s older row for the same URL', async () => {
+  await seedAt('old', USER, SRC, { expired: true });
+
+  const res = await start({ url: SRC, filesize: 10 * MB });
+  assert.equal(res.status, 200);
+  await finish(started[0]);
+
+  const ids = (await store.listByUser(USER)).map((r) => r.downloadId);
+  assert.equal(ids.length, 1);
+  assert.notEqual(ids[0], 'old');
+});
+
+test('a moved-to-cloud row survives a re-download of the same URL', async () => {
+  await seedAt('cloud', USER, SRC, { moved: true, moved_info: { provider: 'dropbox' } });
+
+  await start({ url: SRC, filesize: 10 * MB });
+  await finish(started[0]);
+
+  assert.ok(await store.findForUser('cloud', USER));
+  assert.equal((await store.listByUser(USER)).length, 2);
+});
+
+test('an abandoned re-download leaves the old row alone until it completes', async () => {
+  await seedAt('old', USER, SRC, { expired: true });
+
+  await start({ url: SRC, filesize: 10 * MB });
+  // Job never completes (user navigated away, then it failed).
+  await started[0].hooks.onError(new Error('boom'));
+
+  assert.ok(await store.findForUser('old', USER));
+});
+
+test('superseding frees the old row’s quota', async () => {
+  await seedAt('old', USER, SRC);
+  assert.equal(await store.usageForUser(USER), 100);
+
+  await start({ url: SRC, filesize: 10 * MB });
+  await finish(started[0]);
+
+  // Only the fresh download's real on-disk size remains.
+  assert.equal(await store.usageForUser(USER), 4242);
 });

@@ -46,6 +46,12 @@ function toApiRow(row) {
 const USAGE_WHERE_SQL = "NOT expired AND NOT moved AND coalesce(status, '') <> 'failed'";
 const countsTowardUsage = (r) => !r.expired && !r.moved && r.status !== 'failed';
 
+// Which rows a freshly-completed download for the same URL may replace. Same
+// two-impl rule as above — see supersedeForUser for why moved and in-flight
+// rows are spared, and keep these two lines adjacent.
+const SUPERSEDABLE_SQL = "NOT moved AND coalesce(status, '') <> 'downloading'";
+const isSupersedable = (r) => !r.moved && r.status !== 'downloading';
+
 // Postgres-backed implementation over a `query(text, params)` function (db.js).
 function createStore(query) {
   return {
@@ -185,6 +191,27 @@ function createStore(query) {
       );
       return rowCount > 0;
     },
+
+    // One row per source URL (0XC-10): a download that just COMPLETED replaces
+    // the same user's older rows for the same URL. Returns the superseded ids so
+    // the caller can remove their media too. Two rows are deliberately spared:
+    //   - `moved` — the media is in the user's own cloud and the row still
+    //     carries the "Open in Dropbox/Drive" link, which a re-download doesn't
+    //     supersede.
+    //   - `downloading` — a concurrent job for the same URL. Deleting its row
+    //     would orphan a running job (and strand its partial files).
+    // Expired, failed and live completed rows all go. `SUPERSEDABLE_SQL` and
+    // `isSupersedable` are one rule written twice — keep them adjacent.
+    async supersedeForUser({ downloadId, userId, url }) {
+      if (!url) return [];
+      const { rows } = await query(
+        `DELETE FROM downloads
+          WHERE user_id = $1 AND url = $2 AND download_id <> $3 AND ${SUPERSEDABLE_SQL}
+          RETURNING download_id`,
+        [userId, url, downloadId],
+      );
+      return rows.map((r) => r.download_id);
+    },
   };
 }
 
@@ -299,6 +326,22 @@ function createMemoryStore({ rows = [] } = {}) {
       if (!row || row.user_id !== userId) return false;
       byId.delete(downloadId);
       return true;
+    },
+    async supersedeForUser({ downloadId, userId, url }) {
+      if (!url) return [];
+      const gone = [];
+      for (const row of byId.values()) {
+        if (
+          row.user_id === userId &&
+          row.url === url &&
+          row.download_id !== downloadId &&
+          isSupersedable(row)
+        ) {
+          gone.push(row.download_id);
+        }
+      }
+      for (const id of gone) byId.delete(id);
+      return gone;
     },
     // Test-only escape hatch.
     _rows: byId,

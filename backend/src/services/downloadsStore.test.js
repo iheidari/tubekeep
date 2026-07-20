@@ -156,3 +156,78 @@ test('failStale retires downloads stranded by a restart, sparing recent ones', a
   // The stranded row stops occupying the quota.
   assert.equal(await store.usageForUser(USER), 100);
 });
+
+// --- supersedeForUser (0XC-10: one row per source URL) ----------------------
+
+// Seed a download for `userId` at an explicit `url`, so several rows can share
+// one source. Mirrors `seed` but lets the URL (the match key) vary.
+async function seedAtUrl(store, id, userId, url, patch = {}) {
+  await store.insert({ downloadId: id, userId, url, title: id, type: 'video', filesize: 100 });
+  await store.markComplete(id, { filename: `${id}.mp4`, filesize: 100 });
+  Object.assign(store._rows.get(id), patch);
+}
+
+const SRC = 'https://example.com/watch?v=abc';
+
+test('supersedeForUser drops the user’s older rows for the same URL', async () => {
+  const store = createMemoryStore();
+  await seedAtUrl(store, 'old', USER, SRC, { expired: true });
+  await seedAtUrl(store, 'alsoOld', USER, SRC); // still live — superseded too
+  await seedAtUrl(store, 'fresh', USER, SRC);
+
+  const gone = await store.supersedeForUser({ downloadId: 'fresh', userId: USER, url: SRC });
+
+  assert.deepEqual(gone.sort(), ['alsoOld', 'old']);
+  assert.deepEqual(
+    (await store.listByUser(USER)).map((r) => r.downloadId),
+    ['fresh'],
+  );
+});
+
+test('supersedeForUser spares moved-to-cloud rows', async () => {
+  const store = createMemoryStore();
+  await seedAtUrl(store, 'cloud', USER, SRC, { moved: true, moved_info: { provider: 'dropbox' } });
+  await seedAtUrl(store, 'fresh', USER, SRC);
+
+  assert.deepEqual(
+    await store.supersedeForUser({ downloadId: 'fresh', userId: USER, url: SRC }),
+    [],
+  );
+  assert.ok(await store.findForUser('cloud', USER));
+});
+
+test('supersedeForUser spares an in-flight download of the same URL', async () => {
+  const store = createMemoryStore();
+  await store.insert({ downloadId: 'inflight', userId: USER, url: SRC, filesize: 100 });
+  await seedAtUrl(store, 'fresh', USER, SRC);
+
+  assert.deepEqual(
+    await store.supersedeForUser({ downloadId: 'fresh', userId: USER, url: SRC }),
+    [],
+  );
+  assert.equal((await store.findForUser('inflight', USER)).status, 'downloading');
+});
+
+test('supersedeForUser never touches another user’s rows or a different URL', async () => {
+  const store = createMemoryStore();
+  await seedAtUrl(store, 'theirs', OTHER, SRC);
+  await seedAtUrl(store, 'otherVideo', USER, 'https://example.com/watch?v=zzz');
+  await seedAtUrl(store, 'fresh', USER, SRC);
+
+  assert.deepEqual(
+    await store.supersedeForUser({ downloadId: 'fresh', userId: USER, url: SRC }),
+    [],
+  );
+  assert.ok(await store.findForUser('theirs', OTHER));
+  assert.ok(await store.findForUser('otherVideo', USER));
+});
+
+test('supersedeForUser frees the superseded rows’ quota', async () => {
+  const store = createMemoryStore();
+  await seedAtUrl(store, 'old', USER, SRC);
+  await seedAtUrl(store, 'fresh', USER, SRC);
+  assert.equal(await store.usageForUser(USER), 200);
+
+  await store.supersedeForUser({ downloadId: 'fresh', userId: USER, url: SRC });
+  assert.equal(await store.usageForUser(USER), 100);
+});
