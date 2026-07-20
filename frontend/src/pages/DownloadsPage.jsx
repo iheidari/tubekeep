@@ -553,17 +553,8 @@ function FailedCard({ download, onDismiss }) {
 }
 
 function DownloadsPage() {
-  const {
-    history,
-    expired,
-    apiUrl,
-    removeDownload,
-    forgetExpired,
-    setKept,
-    forgetMoved,
-    dismissFailed,
-    cancelDownload,
-  } = useHistory()
+  const { history, expired, apiUrl, removeDownload, forgetDownload, setKept, cancelDownload } =
+    useHistory()
   const [filter, setFilter] = useState('all')
 
   const items = useMemo(() => {
@@ -620,7 +611,7 @@ function DownloadsPage() {
         <div className="flex flex-col gap-4">
           {items.map((item) => {
             if (item.moved) {
-              return <MovedCard key={item.downloadId} download={item} onForget={forgetMoved} />
+              return <MovedCard key={item.downloadId} download={item} onForget={forgetDownload} />
             }
             if (item.status === 'downloading') {
               return (
@@ -628,10 +619,10 @@ function DownloadsPage() {
               )
             }
             if (item.status === 'failed') {
-              return <FailedCard key={item.downloadId} download={item} onDismiss={dismissFailed} />
+              return <FailedCard key={item.downloadId} download={item} onDismiss={forgetDownload} />
             }
             return item._expired ? (
-              <ExpiredCard key={item.downloadId} download={item} onForget={forgetExpired} />
+              <ExpiredCard key={item.downloadId} download={item} onForget={forgetDownload} />
             ) : (
               <ActiveCard
                 key={item.downloadId}

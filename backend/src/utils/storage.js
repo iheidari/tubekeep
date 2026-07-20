@@ -246,7 +246,9 @@ function markMoved(downloadId, moveInfo) {
   });
 }
 
-function cleanupOldDownloads(maxAgeHours = 24) {
+// `downloads` defaults to a fresh scan; callers that already hold a listing pass
+// it in so one sweep doesn't walk the downloads directory twice.
+function cleanupOldDownloads(maxAgeHours = 24, downloads = listDownloads()) {
   const now = Date.now();
   const maxAgeMs = maxAgeHours * 60 * 60 * 1000;
   const expiredIds = [];
@@ -255,7 +257,7 @@ function cleanupOldDownloads(maxAgeHours = 24) {
   // Reuse the single directory scanner. `expired` (no media files) and `kept`
   // downloads are already surfaced by listDownloads, so this only applies the
   // age predicate — no separate filesystem walk to keep in sync.
-  for (const download of listDownloads()) {
+  for (const download of downloads) {
     if (download.expired || download.kept) continue;
 
     try {

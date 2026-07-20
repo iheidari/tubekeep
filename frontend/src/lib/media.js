@@ -104,15 +104,18 @@ export function isUnlimitedQuota(max) {
 }
 
 // Whether a download of `filesize` bytes fits in the user's remaining storage
-// quota. Mirrors the backend's hasQuotaFor exactly (no multiplier or headroom —
-// the quota counts what a download keeps, not its transient merge footprint),
-// reading the numbers the backend put in the /api/disk response so the two can't
-// drift. Unknown size, unlimited quota, or no disk info yet is never blocked.
+// quota. No multiplier or headroom — the quota counts what a download keeps, not
+// its transient merge footprint. This consumes `quota.remaining` rather than
+// re-deriving it from used/max: the backend's remainingQuota() already encodes
+// both the subtraction and the clamp-at-zero, so there is one definition of "how
+// much is left" and the two sides can't drift. Unknown size, unlimited quota, or
+// no quota info yet is never blocked.
 export function hasQuotaFor(filesize, disk) {
   if (!filesize || filesize <= 0) return true
   if (!disk?.quota) return true
-  if (isUnlimitedQuota(disk.quota.max)) return true
-  return disk.quota.used + filesize <= disk.quota.max
+  // Covers both the -1 sentinel and a missing/garbled value (fail open).
+  if (isUnlimitedQuota(disk.quota.remaining)) return true
+  return filesize <= Number(disk.quota.remaining)
 }
 
 // The single "can this format be downloaded?" answer, combining both guards the

@@ -8,7 +8,10 @@
 // scopes its WHERE clause to it — that scoping is the authorization boundary
 // that keeps one user from reading or deleting another's downloads. The few
 // server-internal methods (markComplete/markFailed/markExpired/markMoved) are
-// driven by background workers that already own the id and have no request user.
+// driven by background workers that already own the id and have no request user;
+// those workers take the store as an argument (see cleanup.js / cloud/jobs.js),
+// so there is exactly one way to get a store and nothing reaches for Postgres in
+// unit tests.
 
 // Shape a `downloads` row into the JSON the API (and therefore the frontend)
 // speaks. Single place the DB column names are translated, so the wire contract
@@ -35,13 +38,16 @@ function toApiRow(row) {
   };
 }
 
+// Which rows occupy the quota: those whose media is gone (expired, moved to the
+// user's own cloud) or never landed (failed) don't count; an in-flight
+// `downloading` row does, so parallel starts can't race past the cap. Written
+// twice — once as SQL, once as JS — so keep the two adjacent: they are one rule
+// and must be changed together or the pg and memory stores silently disagree.
+const USAGE_WHERE_SQL = "NOT expired AND NOT moved AND coalesce(status, '') <> 'failed'";
+const countsTowardUsage = (r) => !r.expired && !r.moved && r.status !== 'failed';
+
 // Postgres-backed implementation over a `query(text, params)` function (db.js).
 function createStore(query) {
-  // Bytes a row occupies against the quota. Rows whose media is gone (expired,
-  // moved to the user's own cloud) or never landed (failed) don't count; an
-  // in-flight `downloading` row does, so parallel starts can't race past the cap.
-  const usageWhere = "NOT expired AND NOT moved AND coalesce(status, '') <> 'failed'";
-
   return {
     // Record a download the moment it starts, so the row exists (as
     // `downloading`) even if the client never comes back for the SSE.
@@ -76,7 +82,7 @@ function createStore(query) {
       const { rows } = await query(
         `SELECT coalesce(sum(filesize), 0) AS used
            FROM downloads
-          WHERE user_id = $1 AND ${usageWhere}`,
+          WHERE user_id = $1 AND ${USAGE_WHERE_SQL}`,
         [userId],
       );
       return Number(rows[0]?.used || 0);
@@ -103,15 +109,21 @@ function createStore(query) {
     // therefore expired. Driving this off "what's actually on disk" rather than
     // "what this run just expired" keeps the table honest no matter who removed
     // the files. Used by the hourly sweep, across all users.
-    async expireMissing(presentIds) {
+    //
+    // `presentIds` is a snapshot of the directory, so a download that COMPLETES
+    // while the sweep is running is absent from it through no fault of its own —
+    // and would be expired the moment it landed. `graceMs` spares rows younger
+    // than that window, which is always longer than a sweep takes.
+    async expireMissing(presentIds, graceMs = 0) {
       const { rowCount } = await query(
         `UPDATE downloads
             SET expired = true, expired_at = now()
           WHERE NOT expired
             AND NOT moved
             AND status = 'complete'
+            AND created_at < now() - ($2::bigint * interval '1 ms')
             AND NOT (download_id = ANY($1::uuid[]))`,
-        [presentIds || []],
+        [presentIds || [], Math.max(0, Math.floor(graceMs))],
       );
       return rowCount;
     },
@@ -170,7 +182,6 @@ function createStore(query) {
 // toApiRow and can't drift in what they expose.
 function createMemoryStore({ rows = [] } = {}) {
   const byId = new Map(rows.map((r) => [r.download_id, r]));
-  const countsTowardUsage = (r) => !r.expired && !r.moved && r.status !== 'failed';
 
   return {
     async insert({ downloadId, userId, url, title, thumbnail, type, filesize, kept }) {
@@ -221,14 +232,16 @@ function createMemoryStore({ rows = [] } = {}) {
       const row = byId.get(downloadId);
       if (row) row.status = 'failed';
     },
-    async expireMissing(presentIds) {
+    async expireMissing(presentIds, graceMs = 0) {
       const present = new Set(presentIds || []);
+      const cutoff = Date.now() - Math.max(0, graceMs);
       let n = 0;
       for (const row of byId.values()) {
         if (
           !row.expired &&
           !row.moved &&
           row.status === 'complete' &&
+          new Date(row.created_at).getTime() < cutoff &&
           !present.has(row.download_id)
         ) {
           row.expired = true;
@@ -279,19 +292,4 @@ function createMemoryStore({ rows = [] } = {}) {
   };
 }
 
-// Background workers (the cleanup sweep, the cloud-move job) run outside any
-// request and can't have a store injected through a router factory, so
-// server.js registers the live store here once at boot. Everything reads it
-// through getActiveStore() and no-ops when it's null — which is exactly the
-// state in unit tests, so nothing reaches for Postgres there.
-let activeStore = null;
-
-function setActiveStore(store) {
-  activeStore = store;
-}
-
-function getActiveStore() {
-  return activeStore;
-}
-
-module.exports = { createStore, createMemoryStore, setActiveStore, getActiveStore, toApiRow };
+module.exports = { createStore, createMemoryStore, toApiRow };

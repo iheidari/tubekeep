@@ -17,6 +17,78 @@ function NoSpaceNote({ formatId, reason }) {
   )
 }
 
+// One selectable format row, shared by the video and audio lists — they differ
+// only in what goes in the badge/title, the extension fallback, and how the Get
+// button is styled. The block/disable semantics (both backend guards, via
+// downloadBlockReason) and the a11y wiring live here once, so the two lists
+// can't drift apart.
+function FormatOption({
+  format,
+  badge,
+  title,
+  extFallback,
+  isBest,
+  disk,
+  startingFormat,
+  buttonClass,
+  onGet,
+}) {
+  const isStarting = startingFormat === format.formatId
+  const blocked = downloadBlockReason(format.filesize, disk)
+  const inactive = startingFormat !== null || blocked !== null
+
+  return (
+    <div className="flex items-center justify-between gap-3 py-4 border-b border-line">
+      <div className="flex items-center gap-3.5 min-w-0">
+        <span
+          className={`min-w-[52px] text-center rounded-lg font-bold text-[13px] px-2 py-[7px] ${
+            isBest ? 'bg-fill text-on-fill' : 'bg-tint text-muted'
+          }`}
+        >
+          {badge}
+        </span>
+        <div className="min-w-0">
+          <p className="font-semibold text-[14px] text-ink truncate">{title}</p>
+          <p className="text-[12px] text-muted">
+            {(format.ext || extFallback).toUpperCase()} · {formatFileSize(format.filesize)}
+            {isBest ? (
+              <>
+                {' · '}
+                <span className="text-pop font-semibold">best</span>
+              </>
+            ) : null}
+          </p>
+          {blocked ? <NoSpaceNote formatId={format.formatId} reason={blocked} /> : null}
+        </div>
+      </div>
+      <button
+        type="button"
+        onClick={() => {
+          // aria-disabled, not disabled: a `disabled` button is skipped by the
+          // tab order, so its aria-describedby reason never reaches screen
+          // reader users (and focus would be dropped mid-flow when a click
+          // disables it). Guard the action here instead.
+          if (inactive) return
+          onGet()
+        }}
+        aria-disabled={inactive}
+        aria-describedby={blocked ? noSpaceId(format.formatId) : undefined}
+        className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-[9px] font-semibold text-[12.5px] transition-all flex-shrink-0 ${
+          inactive ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'
+        } ${buttonClass}`}
+      >
+        <span
+          aria-hidden="true"
+          className={`material-symbols-outlined text-[16px] ${isStarting ? 'animate-spin' : ''}`}
+        >
+          {isStarting ? 'progress_activity' : 'download'}
+        </span>
+        {isStarting ? 'Starting…' : 'Get'}
+      </button>
+    </div>
+  )
+}
+
 function FormatSelector({ info, onDownload, startingFormat = null, disk = null }) {
   const [keep, setKeep] = useState(false)
 
@@ -252,74 +324,24 @@ function FormatSelector({ info, onDownload, startingFormat = null, disk = null }
           ) : (
             <div className="flex flex-col">
               {videoOptions.map((format, idx) => {
-                const h = getHeight(format.resolution)
-                const isStarting = startingFormat === format.formatId
                 const isBest = idx === 0
-                const blocked = downloadBlockReason(format.filesize, disk)
-                const inactive = startingFormat !== null || blocked !== null
                 return (
-                  <div
+                  <FormatOption
                     key={format.formatId}
-                    className="flex items-center justify-between gap-3 py-4 border-b border-line"
-                  >
-                    <div className="flex items-center gap-3.5 min-w-0">
-                      <span
-                        className={`min-w-[52px] text-center rounded-lg font-bold text-[13px] px-2 py-[7px] ${
-                          isBest ? 'bg-fill text-on-fill' : 'bg-tint text-muted'
-                        }`}
-                      >
-                        {heightLabel(format.resolution)}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="font-semibold text-[14px] text-ink truncate">
-                          {qualityName(h)}
-                        </p>
-                        <p className="text-[12px] text-muted">
-                          {(format.ext || 'mp4').toUpperCase()} · {formatFileSize(format.filesize)}
-                          {isBest ? (
-                            <>
-                              {' · '}
-                              <span className="text-pop font-semibold">best</span>
-                            </>
-                          ) : null}
-                        </p>
-                        {blocked ? (
-                          <NoSpaceNote formatId={format.formatId} reason={blocked} />
-                        ) : null}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        // aria-disabled, not disabled: a `disabled` button is
-                        // skipped by the tab order, so its aria-describedby
-                        // reason never reaches screen reader users (and focus
-                        // would be dropped mid-flow when a click disables it).
-                        // Guard the action here instead.
-                        if (inactive) return
-                        onDownload(format.formatId, format._type, keep, format.filesize)
-                      }}
-                      aria-disabled={inactive}
-                      aria-describedby={blocked ? noSpaceId(format.formatId) : undefined}
-                      className={`flex items-center gap-1.5 px-3.5 py-2.5 rounded-[9px] font-semibold text-[12.5px] transition-all flex-shrink-0 ${
-                        inactive ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'
-                      } ${
-                        isBest
-                          ? 'bg-fill text-on-fill'
-                          : 'bg-surface text-ink border border-line2 hover:bg-tint'
-                      }`}
-                    >
-                      <span
-                        aria-hidden="true"
-                        className={`material-symbols-outlined text-[16px] ${
-                          isStarting ? 'animate-spin' : ''
-                        }`}
-                      >
-                        {isStarting ? 'progress_activity' : 'download'}
-                      </span>
-                      {isStarting ? 'Starting…' : 'Get'}
-                    </button>
-                  </div>
+                    format={format}
+                    badge={heightLabel(format.resolution)}
+                    title={qualityName(getHeight(format.resolution))}
+                    extFallback="mp4"
+                    isBest={isBest}
+                    disk={disk}
+                    startingFormat={startingFormat}
+                    buttonClass={
+                      isBest
+                        ? 'bg-fill text-on-fill'
+                        : 'bg-surface text-ink border border-line2 hover:bg-tint'
+                    }
+                    onGet={() => onDownload(format.formatId, format._type, keep, format.filesize)}
+                  />
                 )
               })}
             </div>
@@ -339,67 +361,20 @@ function FormatSelector({ info, onDownload, startingFormat = null, disk = null }
           ) : (
             <div className="flex flex-col">
               {audioOptions.map((format, idx) => {
-                const isStarting = startingFormat === format.formatId
-                const isBest = idx === 0
                 const abr = Math.round(format.abr || 0)
-                const blocked = downloadBlockReason(format.filesize, disk)
-                const inactive = startingFormat !== null || blocked !== null
                 return (
-                  <div
+                  <FormatOption
                     key={format.formatId}
-                    className="flex items-center justify-between gap-3 py-4 border-b border-line"
-                  >
-                    <div className="flex items-center gap-3.5 min-w-0">
-                      <span
-                        className={`min-w-[52px] text-center rounded-lg font-bold text-[13px] px-2 py-[7px] ${
-                          isBest ? 'bg-fill text-on-fill' : 'bg-tint text-muted'
-                        }`}
-                      >
-                        {abr ? `${abr}k` : (format.ext || 'aud').toUpperCase()}
-                      </span>
-                      <div className="min-w-0">
-                        <p className="font-semibold text-[14px] text-ink truncate">
-                          {isBest ? 'High Quality' : 'Standard'}
-                        </p>
-                        <p className="text-[12px] text-muted">
-                          {(format.ext || 'm4a').toUpperCase()} · {formatFileSize(format.filesize)}
-                          {isBest ? (
-                            <>
-                              {' · '}
-                              <span className="text-pop font-semibold">best</span>
-                            </>
-                          ) : null}
-                        </p>
-                        {blocked ? (
-                          <NoSpaceNote formatId={format.formatId} reason={blocked} />
-                        ) : null}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        // See the video button above: aria-disabled keeps the
-                        // control focusable so its reason is announced.
-                        if (inactive) return
-                        onDownload(format.formatId, 'audio', keep, format.filesize)
-                      }}
-                      aria-disabled={inactive}
-                      aria-describedby={blocked ? noSpaceId(format.formatId) : undefined}
-                      className={`flex items-center gap-1.5 bg-surface text-ink border border-ink px-3.5 py-2.5 rounded-[9px] font-semibold text-[12.5px] hover:bg-tint transition-all flex-shrink-0 ${
-                        inactive ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'
-                      }`}
-                    >
-                      <span
-                        aria-hidden="true"
-                        className={`material-symbols-outlined text-[16px] ${
-                          isStarting ? 'animate-spin' : ''
-                        }`}
-                      >
-                        {isStarting ? 'progress_activity' : 'download'}
-                      </span>
-                      {isStarting ? 'Starting…' : 'Get'}
-                    </button>
-                  </div>
+                    format={format}
+                    badge={abr ? `${abr}k` : (format.ext || 'aud').toUpperCase()}
+                    title={idx === 0 ? 'High Quality' : 'Standard'}
+                    extFallback="m4a"
+                    isBest={idx === 0}
+                    disk={disk}
+                    startingFormat={startingFormat}
+                    buttonClass="bg-surface text-ink border border-ink hover:bg-tint"
+                    onGet={() => onDownload(format.formatId, 'audio', keep, format.filesize)}
+                  />
                 )
               })}
               <div className="flex items-center gap-2.5 py-3.5 text-faint">

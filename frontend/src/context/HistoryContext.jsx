@@ -165,10 +165,14 @@ export function HistoryProvider({ children }) {
     })
   }, [])
 
-  // Dismiss a failed download. Its row exists server-side (and would come back on
-  // the next sync), so this hard-deletes it rather than only dropping it locally
-  // — a download that never landed has nothing worth keeping or re-expiring.
-  const dismissFailed = useCallback(async (downloadId) => {
+  // Permanently forget a download — the one "get rid of this row for good" path,
+  // shared by the failed, expired and moved cards. All three hold a row that
+  // exists server-side (and would come back on the next sync), and none has media
+  // worth keeping or re-expiring: a failed download never landed, an expired one
+  // already lost its files, and a moved one lives in the visitor's cloud now. So
+  // hard-delete server-side first, then drop the id from both lists (it only ever
+  // lives in one, so the other filter is a no-op).
+  const forgetDownload = useCallback(async (downloadId) => {
     await forgetOnServer(downloadId)
     setHistory((prev) => prev.filter((d) => d.downloadId !== downloadId))
     setExpired((prev) => prev.filter((d) => d.downloadId !== downloadId))
@@ -204,11 +208,6 @@ export function HistoryProvider({ children }) {
     }
   }, [])
 
-  const forgetExpired = useCallback(async (downloadId) => {
-    await forgetOnServer(downloadId)
-    setExpired((prev) => prev.filter((d) => d.downloadId !== downloadId))
-  }, [])
-
   const setKept = useCallback(async (downloadId, kept) => {
     // Optimistic update; revert on failure.
     setHistory((prev) => prev.map((d) => (d.downloadId === downloadId ? { ...d, kept } : d)))
@@ -241,15 +240,6 @@ export function HistoryProvider({ children }) {
     setExpired((prev) => prev.filter((d) => d.downloadId !== downloadId))
   }, [])
 
-  // Permanently forget a moved download. The server still holds its row (source
-  // URL + cloud link), so hard-delete it there before dropping it from local
-  // state — otherwise it would reappear on the next sync.
-  const forgetMoved = useCallback(async (downloadId) => {
-    await forgetOnServer(downloadId)
-    setHistory((prev) => prev.filter((d) => d.downloadId !== downloadId))
-    setExpired((prev) => prev.filter((d) => d.downloadId !== downloadId))
-  }, [])
-
   const value = useMemo(
     () => ({
       history,
@@ -258,14 +248,12 @@ export function HistoryProvider({ children }) {
       addDownload,
       startPending,
       markFailed,
-      dismissFailed,
+      forgetDownload,
       cancelDownload,
       removeDownload,
-      forgetExpired,
       setKept,
       findById,
       markMoved,
-      forgetMoved,
     }),
     [
       history,
@@ -273,14 +261,12 @@ export function HistoryProvider({ children }) {
       addDownload,
       startPending,
       markFailed,
-      dismissFailed,
+      forgetDownload,
       cancelDownload,
       removeDownload,
-      forgetExpired,
       setKept,
       findById,
       markMoved,
-      forgetMoved,
     ],
   )
 

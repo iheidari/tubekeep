@@ -55,6 +55,7 @@ function createDownloadRouter({ store, start = startJob }) {
 
     const downloadId = uuidv4();
     const resolvedType = type || 'video';
+    const kept = keep === true || keep === 'true';
 
     // The selected format's byte size. Untrusted (it comes from the client) and
     // only a UX guard, exactly like the disk check it feeds — the real size is
@@ -63,48 +64,50 @@ function createDownloadRouter({ store, start = startJob }) {
     const wantBytes = Number.parseInt(filesize, 10);
     const hasWantBytes = Number.isFinite(wantBytes) && wantBytes > 0;
 
-    // Guard 1 — per-user storage quota. Fail-CLOSED on a store error, unlike the
-    // disk guard below: the quota is the user's own accounting, so a database
-    // outage must not silently hand out unlimited storage.
+    // Both pre-download guards, behind the one condition that gates them: an
+    // unknown/absent size is never blocked. The two lookups are independent, so
+    // they run concurrently — a Neon round-trip and a statfs, not one after the
+    // other — but they're still evaluated in order, quota before disk, so the
+    // rejection the user sees is the one that matters most to them.
     if (hasWantBytes) {
-      const max = req.user.max_storage_bytes;
-      let used;
-      try {
-        used = await store.usageForUser(userId);
-      } catch (err) {
-        console.error(`❌ Quota check failed for ${downloadId}: ${err.message}`);
+      const max = Number(req.user.max_storage_bytes);
+      const [usage, disk] = await Promise.allSettled([store.usageForUser(userId), getDiskUsage()]);
+
+      // Guard 1 — per-user storage quota. Fail-CLOSED on a store error, unlike
+      // the disk guard below: the quota is the user's own accounting, so a
+      // database outage must not silently hand out unlimited storage.
+      if (usage.status === 'rejected') {
+        console.error(`❌ Quota check failed for ${downloadId}: ${usage.reason?.message}`);
         return res
           .status(500)
           .json({ success: false, error: 'Could not check your storage quota — try again' });
       }
+      const used = usage.value;
       if (!hasQuotaFor(used, max, wantBytes)) {
         const left = remainingQuota(used, max);
         console.warn(
           `⚠️  Refusing download ${downloadId}: over quota (${formatBytes(used)} of ` +
-            `${formatBytes(Number(max))} used, wants ${formatBytes(wantBytes)})`,
+            `${formatBytes(max)} used, wants ${formatBytes(wantBytes)})`,
         );
         return res.status(507).json({
           success: false,
           error:
             `Not enough storage in your account — this download needs ${formatBytes(wantBytes)} ` +
-            `but only ${formatBytes(left)} of your ${formatBytes(Number(max))} quota is left. ` +
+            `but only ${formatBytes(left)} of your ${formatBytes(max)} quota is left. ` +
             'Delete something from your downloads to free space.',
         });
       }
-    }
 
-    // Guard 2 — global free disk. Backstops the client-side disable-check:
-    // refuse a download that won't fit within the disk margin before starting
-    // the job. Fail-OPEN: if reading disk usage errors, we let the download
-    // proceed rather than block it (this is server housekeeping, not the user's
-    // allowance, and the frontend degrades the same way when /api/disk fails).
-    if (hasWantBytes) {
-      let free = null;
-      try {
-        ({ free } = await getDiskUsage());
-      } catch (diskErr) {
-        console.warn(`⚠️  Disk-space check skipped for ${downloadId}: ${diskErr.message}`);
+      // Guard 2 — global free disk. Backstops the client-side disable-check:
+      // refuse a download that won't fit within the disk margin before starting
+      // the job. Fail-OPEN: if reading disk usage errors, we let the download
+      // proceed rather than block it (this is server housekeeping, not the
+      // user's allowance, and the frontend degrades the same way when /api/disk
+      // fails).
+      if (disk.status === 'rejected') {
+        console.warn(`⚠️  Disk-space check skipped for ${downloadId}: ${disk.reason?.message}`);
       }
+      const free = disk.status === 'fulfilled' ? disk.value.free : null;
       if (free !== null && !hasRoomFor(free, wantBytes)) {
         // Report the margined requirement straight from the fit math so the
         // "need ~X" figure can't drift from the actual check (incl. headroom).
@@ -134,7 +137,7 @@ function createDownloadRouter({ store, start = startJob }) {
         thumbnail,
         type: resolvedType,
         filesize: hasWantBytes ? wantBytes : null,
-        kept: keep === true || keep === 'true',
+        kept,
       });
     } catch (err) {
       console.error(`❌ Failed to record download ${downloadId}:`, err.message);
@@ -150,7 +153,7 @@ function createDownloadRouter({ store, start = startJob }) {
           type: resolvedType,
           title,
           thumbnail,
-          keep: keep === true || keep === 'true',
+          keep: kept,
         },
         {
           // Terminal outcomes land on the user's row. `result.size` is the real

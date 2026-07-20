@@ -99,12 +99,30 @@ test('expireMissing retires rows whose media is gone, keeping those still on dis
   await seed(store, 'onDisk', USER, 100);
   await seed(store, 'vanished', USER, 100);
   await store.insert({ downloadId: 'running', userId: USER, filesize: 100 });
+  // Age them past the grace window (asserted separately below) so this case is
+  // only about presence on disk, not about how recently the row was created.
+  for (const id of ['onDisk', 'vanished', 'running']) {
+    store._rows.get(id).created_at = new Date(Date.now() - 60 * 60 * 1000);
+  }
 
   assert.equal(await store.expireMissing(['onDisk', 'running']), 1);
   assert.equal((await store.findForUser('vanished', USER)).expired, true);
   assert.equal((await store.findForUser('onDisk', USER)).expired, false);
   // An in-flight row has no media on disk yet — it must not be expired.
   assert.equal((await store.findForUser('running', USER)).expired, false);
+});
+
+test('expireMissing spares rows younger than the grace window', async () => {
+  const store = createMemoryStore();
+  // A download that completed *during* the sweep is absent from the directory
+  // snapshot the reconcile compares against — it must not be expired on arrival.
+  await seed(store, 'justLanded', USER, 100);
+  await seed(store, 'longGone', USER, 100);
+  store._rows.get('longGone').created_at = new Date(Date.now() - 60 * 60 * 1000);
+
+  assert.equal(await store.expireMissing([], 10 * 60 * 1000), 1);
+  assert.equal((await store.findForUser('justLanded', USER)).expired, false);
+  assert.equal((await store.findForUser('longGone', USER)).expired, true);
 });
 
 test('failStale retires downloads stranded by a restart, sparing recent ones', async () => {

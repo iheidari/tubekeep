@@ -1,7 +1,6 @@
 const { EventEmitter } = require('node:events');
 const { v4: uuidv4 } = require('uuid');
 const { getDownload, getDownloadFilePath, markMoved } = require('../../utils/storage');
-const { getActiveStore } = require('../downloadsStore');
 const { getProvider } = require('./index');
 const fs = require('node:fs');
 
@@ -116,10 +115,9 @@ async function run(job) {
     // (source URL + cloud link) but stops counting toward the owner's quota,
     // since its bytes now live in the visitor's cloud, not ours. Best-effort —
     // the upload itself already succeeded, so a DB blip must not fail the job.
-    const store = getActiveStore();
-    if (store) {
+    if (job.store) {
       try {
-        await store.markMoved(job.downloadId, result);
+        await job.store.markMoved(job.downloadId, result);
       } catch (err) {
         console.error(`⚠️  Could not flag ${job.downloadId} as moved: ${err.message}`);
       }
@@ -152,14 +150,17 @@ function drain() {
 }
 
 // Create a queued upload job and return its snapshot. `accessToken` is held in
-// memory on the job only, never logged or persisted.
-function createJob({ downloadId, providerName, accessToken }) {
+// memory on the job only, never logged or persisted. `store` is the per-user
+// history store the caller already holds; omitted (unit tests, no database) the
+// job just skips the "moved" mirror.
+function createJob({ downloadId, providerName, accessToken, store = null }) {
   const jobId = uuidv4();
   const job = {
     jobId,
     downloadId,
     providerName,
     accessToken,
+    store,
     status: 'queued',
     progress: 0,
     error: null,

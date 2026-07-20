@@ -84,7 +84,7 @@ function createCloudRouter({ store }) {
       return res.status(500).json({ success: false, error: 'Failed to start upload' });
     }
 
-    const job = createJob({ downloadId, providerName, accessToken });
+    const job = createJob({ downloadId, providerName, accessToken, store });
     res.json({ success: true, data: { jobId: job.jobId, status: job.status } });
   });
 

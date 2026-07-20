@@ -15,9 +15,13 @@ function createDiskRouter({ store }) {
 
   router.get('/', async (req, res) => {
     try {
-      const { total, free, used } = await getDiskUsage();
+      // Independent lookups (a statfs and a Neon round-trip) — run them together
+      // so the format screen's storage banner doesn't wait for one then the other.
+      const [{ total, free, used }, quotaUsed] = await Promise.all([
+        getDiskUsage(),
+        store.usageForUser(req.user.user_id),
+      ]);
       const max = Number(req.user.max_storage_bytes);
-      const quotaUsed = await store.usageForUser(req.user.user_id);
 
       res.json({
         success: true,

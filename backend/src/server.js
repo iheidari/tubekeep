@@ -21,7 +21,7 @@ const { createCloudRouter } = require('./routes/cloud');
 const { createDiskRouter } = require('./routes/disk');
 const { createAuthRouter } = require('./routes/auth');
 const { createStore } = require('./services/authStore');
-const { createStore: createDownloadsStore, setActiveStore } = require('./services/downloadsStore');
+const { createStore: createDownloadsStore } = require('./services/downloadsStore');
 const { createRequireAuth } = require('./middleware/requireAuth');
 const mailer = require('./services/mailer');
 const { query } = require('./db');
@@ -133,11 +133,10 @@ app.use('/api', (_req, res, next) => {
 const store = createStore(query);
 const requireAuth = createRequireAuth(store);
 
-// Per-user download history + storage quota. Routers get it injected; the
-// background workers (hourly cleanup sweep, cloud-move job) that run outside any
-// request read it from the registry this call populates.
+// Per-user download history + storage quota. Injected into the routers below and
+// into the background workers (hourly cleanup sweep, cloud-move job) that run
+// outside any request — one store, handed down explicitly.
 const downloadsStore = createDownloadsStore(query);
-setActiveStore(downloadsStore);
 
 // Auth endpoints are public (they establish the session). The magic-link
 // request route is rate-limited inside the router; the store + mailer are
@@ -194,7 +193,7 @@ app.use((err, _req, res, _next) => {
   });
 });
 
-startCleanupScheduler();
+startCleanupScheduler({ store: downloadsStore });
 
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
