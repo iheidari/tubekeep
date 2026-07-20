@@ -3,7 +3,7 @@ const {
   requestMagicLink,
   verifyMagicLink,
   signSession,
-  appUrl,
+  frontendUrl,
   SESSION_COOKIE,
   SESSION_TTL_SECONDS,
 } = require('../services/authService');
@@ -59,17 +59,17 @@ function createAuthRouter({ store, mailer }) {
     try {
       const user = await verifyMagicLink(token, { store });
       if (!user) {
-        return res.redirect(`${appUrl()}/?login=error`);
+        return res.redirect(`${frontendUrl()}/?login=error`);
       }
       const session = signSession(user);
       res.cookie(SESSION_COOKIE, session, {
         ...sessionCookieOptions(),
         maxAge: SESSION_TTL_SECONDS * 1000,
       });
-      return res.redirect(`${appUrl()}/?login=success`);
+      return res.redirect(`${frontendUrl()}/?login=success`);
     } catch (err) {
       console.error('❌ Magic-link verify error:', err.message);
-      return res.redirect(`${appUrl()}/?login=error`);
+      return res.redirect(`${frontendUrl()}/?login=error`);
     }
   });
 

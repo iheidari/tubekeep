@@ -9,6 +9,8 @@ const {
   signSession,
   verifySession,
   hashToken,
+  appUrl,
+  frontendUrl,
   TOKEN_TTL_MS,
 } = require('./authService');
 const { createMemoryStore } = require('./authStore');
@@ -118,4 +120,26 @@ test('session JWT round-trips and rejects tampering', () => {
   assert.equal(payload.email, 'alice@example.com');
   assert.equal(verifySession(`${token}tampered`), null);
   assert.equal(verifySession(null), null);
+});
+
+// In split dev (Vite :5173 + API :3001) the magic link must point at the backend
+// but the post-verify redirect must land on the Vite origin, or the user ends up
+// on the backend's stale `frontend/dist` build.
+test('frontendUrl prefers FRONTEND_URL and falls back to APP_URL', () => {
+  const savedApp = process.env.APP_URL;
+  const savedFront = process.env.FRONTEND_URL;
+  try {
+    process.env.APP_URL = 'http://localhost:3001';
+    process.env.FRONTEND_URL = 'http://localhost:5173/';
+    assert.equal(frontendUrl(), 'http://localhost:5173');
+    assert.equal(appUrl(), 'http://localhost:3001', 'the link base stays on the backend');
+
+    delete process.env.FRONTEND_URL;
+    assert.equal(frontendUrl(), 'http://localhost:3001', 'single-server mode: same origin');
+  } finally {
+    if (savedApp === undefined) delete process.env.APP_URL;
+    else process.env.APP_URL = savedApp;
+    if (savedFront === undefined) delete process.env.FRONTEND_URL;
+    else process.env.FRONTEND_URL = savedFront;
+  }
 });

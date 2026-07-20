@@ -37,7 +37,15 @@ async function sendMagicLink(email, rawToken) {
     const resend = new Resend(apiKey);
     const from = process.env.EMAIL_FROM || 'Tubekeep <onboarding@resend.dev>';
     const { subject, text, html } = renderEmail(link);
-    await resend.emails.send({ from, to: email, subject, text, html });
+    // The Resend SDK resolves with `{ data, error }` rather than throwing on an
+    // API rejection (403 unverified-domain, 422 bad `from`, …), so an unchecked
+    // await silently swallows every delivery failure. Surface it in the logs.
+    const { error } = await resend.emails.send({ from, to: email, subject, text, html });
+    if (error) {
+      console.error(
+        `❌ Resend rejected the magic link to ${email} (${error.statusCode} ${error.name}): ${error.message}`,
+      );
+    }
   } catch (err) {
     console.error(`❌ Failed to send magic link to ${email}:`, err.message);
   }

@@ -15,11 +15,20 @@ function getJwtSecret() {
   return secret;
 }
 
-// The app's public base URL (no trailing slash). Single source of truth so the
-// emailed magic link (mailer) and the post-login redirect (auth router) can't
-// drift onto different origins.
+// The backend's public base URL (no trailing slash). The emailed magic link must
+// point here — /api/auth/verify is what consumes the token and sets the cookie.
 function appUrl() {
   return (process.env.APP_URL || 'http://localhost:3001').replace(/\/+$/, '');
+}
+
+// Where to land the browser *after* verifying. In single-server mode the SPA is
+// served by this backend, so APP_URL is right. In split dev (Vite on :5173,
+// API on :3001) it is not — sending the user to APP_URL would drop them on the
+// backend's stale `frontend/dist` build. FRONTEND_URL is already the pinned dev
+// origin for CORS, so reuse it and fall back to APP_URL when unset (production).
+// Safe because it is operator config, never anything the request supplies.
+function frontendUrl() {
+  return (process.env.FRONTEND_URL || appUrl()).replace(/\/+$/, '');
 }
 
 // Raw token the user receives in the link; the hash is what we store.
@@ -87,6 +96,7 @@ module.exports = {
   SESSION_TTL_SECONDS,
   SESSION_COOKIE,
   appUrl,
+  frontendUrl,
   generateToken,
   hashToken,
   signSession,
