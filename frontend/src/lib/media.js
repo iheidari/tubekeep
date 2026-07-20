@@ -97,9 +97,8 @@ export function hasRoomFor(filesize, disk) {
   return disk.free >= filesize * disk.sizeMultiplier + disk.headroomBytes
 }
 
-// A quota `max`/`remaining` of -1 means "no cap".
-export const UNLIMITED_QUOTA = -1
-
+// A quota `max`/`remaining` of -1 means "no cap" (the `users.max_storage_bytes`
+// sentinel; see the backend's UNLIMITED_QUOTA).
 export function isUnlimitedQuota(max) {
   return !Number.isFinite(Number(max)) || Number(max) < 0
 }

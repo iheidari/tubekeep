@@ -8,6 +8,7 @@ const {
   hasQuotaFor,
   remainingQuota,
   deleteDownload,
+  isValidDownloadId,
 } = require('../utils/storage');
 const { initSSE } = require('../utils/sse');
 const { startJob, subscribe, cancelJob, DownloadCapError } = require('../services/downloadManager');
@@ -241,30 +242,38 @@ function createDownloadRouter({ store, start = startJob }) {
   // yt-dlp layer removes partials on abort). Wired to the "Dismiss" on a
   // downloading row and the "Cancel" on the download page. The history row is
   // dropped too — a cancelled download never landed, so it shouldn't linger in
-  // the list or count against the quota. Scoped to the caller's own rows.
+  // the list or count against the quota.
+  //
+  // Deleting the row comes FIRST and is what authorizes the rest: its `WHERE
+  // user_id` is the ownership check, so a download id belonging to someone else
+  // matches nothing and we stop at 404 without touching their job. (Aborting
+  // first would let any logged-in user kill another user's running download by
+  // id alone.) A second click finds no row and 404s — harmless, the first one
+  // already cancelled.
   router.delete('/:downloadId', async (req, res) => {
     const { downloadId } = req.params;
-    const cancelled = cancelJob(downloadId);
+    if (!isValidDownloadId(downloadId)) {
+      return res.status(404).json({ success: false, error: 'Download not found' });
+    }
 
-    let rowDeleted = false;
+    let owned;
     try {
-      rowDeleted = await store.deleteForUser(downloadId, req.user.user_id);
+      owned = await store.deleteForUser(downloadId, req.user.user_id);
     } catch (err) {
       console.error(`❌ Failed to drop cancelled download ${downloadId}:`, err.message);
+      return res.status(500).json({ success: false, error: 'Failed to cancel the download' });
+    }
+    if (!owned) {
+      return res.status(404).json({ success: false, error: 'Download not found' });
     }
 
-    // Either half succeeding means we cancelled something real: the job may have
-    // already finished and been swept while its row lived on, or vice versa.
-    if (cancelled || rowDeleted) {
-      if (rowDeleted) {
-        // Drop the directory too. yt-dlp removes its own partials on abort, but
-        // a job that finished in the gap between the click and this request
-        // would otherwise leave media on disk with no row pointing at it.
-        deleteDownload(downloadId);
-      }
-      return res.json({ success: true, message: 'Download cancelled' });
-    }
-    return res.status(404).json({ success: false, error: 'Download not found' });
+    // Ours: stop the job if it's still running, then drop the directory. yt-dlp
+    // removes its own partials on abort, but a job that finished in the gap
+    // between the click and this request would otherwise leave media on disk
+    // with no row pointing at it.
+    cancelJob(downloadId);
+    deleteDownload(downloadId);
+    return res.json({ success: true, message: 'Download cancelled' });
   });
 
   return router;
