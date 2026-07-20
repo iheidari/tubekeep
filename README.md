@@ -351,10 +351,9 @@ npm run build  # Creates dist/ folder
 
 ## Contributing
 
-Auth and the database layer now exist (magic-link login, Neon Postgres). Still on the roadmap for full multi-user support:
-1. Frontend login + session UI (consumes the `/api/auth/*` endpoints)
-2. Move download history to Postgres and associate downloads with user IDs
-3. Enforce the per-user storage quota (`users.max_storage_bytes`)
+Auth, the database layer, and the login UI now exist (magic-link login, Neon Postgres, a gated React SPA). Still on the roadmap for full multi-user support:
+1. Move download history to Postgres and associate downloads with user IDs
+2. Enforce the per-user storage quota (`users.max_storage_bytes`)
 
 ## License
 

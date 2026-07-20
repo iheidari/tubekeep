@@ -46,7 +46,11 @@ export function useDownloadProgress(downloadId, callbacks = {}) {
     // Defer to a microtask so StrictMode's synchronous double-mount cleanup
     // cancels the duplicate before it opens a connection.
     const startTimer = setTimeout(() => {
-      eventSource = new EventSource(`${apiUrl}/api/download/progress/${downloadId}`)
+      // withCredentials so the session cookie rides the SSE (this route is behind
+      // requireAuth); harmless same-origin.
+      eventSource = new EventSource(`${apiUrl}/api/download/progress/${downloadId}`, {
+        withCredentials: true,
+      })
 
       eventSource.onmessage = async (event) => {
         const data = JSON.parse(event.data)

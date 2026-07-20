@@ -9,7 +9,7 @@
 //     server-side. The access token is sent to /api/cloud/upload in the body,
 //     never in a URL.
 
-import { API_URL } from './media'
+import { API_URL, apiFetch } from './media'
 
 // Per-provider static metadata. The OAuth client id + redirect URI are resolved
 // at runtime from the backend's /api/cloud/providers (or a VITE_ override). The
@@ -86,7 +86,7 @@ function resolveConfig(name, serverEntry) {
 // for the tab on success. Returns [{ name, label, icon, clientId, redirectUri }].
 export function getEnabledProviders() {
   if (!providersPromise) {
-    providersPromise = fetch(`${API_URL}/api/cloud/providers`)
+    providersPromise = apiFetch(`${API_URL}/api/cloud/providers`)
       .then((r) => r.json())
       .then((body) => {
         const server = body?.data || []
@@ -210,7 +210,7 @@ export async function connect(name) {
     )
   })
 
-  const res = await fetch(`${API_URL}/api/cloud/oauth/token`, {
+  const res = await apiFetch(`${API_URL}/api/cloud/oauth/token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -250,7 +250,7 @@ export async function getFreshAccessToken(name) {
   const fresh = token.expiresAt && Date.now() < token.expiresAt - REFRESH_SKEW_MS
   if (fresh || !token.refreshToken) return token.accessToken
 
-  const res = await fetch(`${API_URL}/api/cloud/oauth/refresh`, {
+  const res = await apiFetch(`${API_URL}/api/cloud/oauth/refresh`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ provider: name, refreshToken: token.refreshToken }),

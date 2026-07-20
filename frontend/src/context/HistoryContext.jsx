@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { fetchDownloads, fileUrl } from '../lib/media'
+import { apiFetch, fetchDownloads, fileUrl } from '../lib/media'
 import {
   EXPIRED_STORAGE_KEY,
   HISTORY_API_URL,
@@ -28,7 +28,9 @@ function decorate(d) {
 // visitor permanently forgets an expired or moved card.
 async function forgetOnServer(downloadId) {
   try {
-    await fetch(`${HISTORY_API_URL}/api/files/${downloadId}?permanent=true`, { method: 'DELETE' })
+    await apiFetch(`${HISTORY_API_URL}/api/files/${downloadId}?permanent=true`, {
+      method: 'DELETE',
+    })
   } catch (err) {
     console.error('❌ Forget error:', err)
   }
@@ -174,7 +176,7 @@ export function HistoryProvider({ children }) {
   // locally (fire-and-forget — the row goes either way).
   const cancelDownload = useCallback(async (downloadId) => {
     try {
-      await fetch(`${HISTORY_API_URL}/api/download/${downloadId}`, { method: 'DELETE' })
+      await apiFetch(`${HISTORY_API_URL}/api/download/${downloadId}`, { method: 'DELETE' })
     } catch (err) {
       console.error('❌ Cancel error:', err)
     }
@@ -183,7 +185,7 @@ export function HistoryProvider({ children }) {
 
   const removeDownload = useCallback(async (downloadId) => {
     try {
-      await fetch(`${HISTORY_API_URL}/api/files/${downloadId}`, { method: 'DELETE' })
+      await apiFetch(`${HISTORY_API_URL}/api/files/${downloadId}`, { method: 'DELETE' })
     } catch (err) {
       console.error('❌ Expire error:', err)
     }
@@ -207,7 +209,7 @@ export function HistoryProvider({ children }) {
     // Optimistic update; revert on failure.
     setHistory((prev) => prev.map((d) => (d.downloadId === downloadId ? { ...d, kept } : d)))
     try {
-      const response = await fetch(`${HISTORY_API_URL}/api/files/${downloadId}?kept=${kept}`, {
+      const response = await apiFetch(`${HISTORY_API_URL}/api/files/${downloadId}?kept=${kept}`, {
         method: 'PATCH',
       })
       const data = await response.json()
