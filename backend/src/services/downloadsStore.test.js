@@ -109,6 +109,15 @@ test('a moved row exposes its cloud link as `moved` so the UI renders a Moved ca
   assert.equal(await store.usageForUser(USER), 0);
 });
 
+test('keptIds returns every kept download across all users — the cleanup sweep’s exclusion set', async () => {
+  const store = createMemoryStore();
+  await seed(store, 'a', USER, 100, { kept: true });
+  await seed(store, 'b', USER, 100, { kept: false });
+  await seed(store, 'c', OTHER, 100, { kept: true });
+
+  assert.deepEqual((await store.keptIds()).sort(), ['a', 'c']);
+});
+
 test('expireMissing retires rows whose media is gone, keeping those still on disk', async () => {
   const store = createMemoryStore();
   await seed(store, 'onDisk', USER, 100);

@@ -146,6 +146,14 @@ function createStore(query) {
       ]);
     },
 
+    // Every `kept` download's id, across all users — the cleanup sweep's
+    // exclusion set. A directory the sweep would otherwise age out is never
+    // touched while its row says `kept`, no matter how stale it looks on disk.
+    async keptIds() {
+      const { rows } = await query('SELECT download_id FROM downloads WHERE kept', []);
+      return rows.map((r) => r.download_id);
+    },
+
     // Retire `downloading` rows that can no longer be running. The job registry
     // is in-memory, so a restart mid-download strands its row — and a stranded
     // row would count against the user's quota forever. Called by the hourly
@@ -296,6 +304,9 @@ function createMemoryStore({ rows = [] } = {}) {
       if (!row) return;
       row.moved = true;
       row.moved_info = movedInfo || null;
+    },
+    async keptIds() {
+      return [...byId.values()].filter((r) => r.kept).map((r) => r.download_id);
     },
     async failStale(olderThanMs) {
       const cutoff = Date.now() - olderThanMs;

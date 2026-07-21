@@ -1,10 +1,5 @@
-const {
-  cleanupOldDownloads,
-  cleanupOrphanDirs,
-  listDownloads,
-  isValidDownloadId,
-} = require('../utils/storage');
-const { sweepJobs } = require('./downloadManager');
+const { cleanupOldDownloads, listDownloadDirs, isValidDownloadId } = require('../utils/storage');
+const { sweepJobs, runningDownloadIds } = require('./downloadManager');
 
 const CLEANUP_INTERVAL_HOURS = 1;
 // Downloads are a transfer, not storage: a visitor either moves a file to their
@@ -13,8 +8,7 @@ const MAX_FILE_AGE_HOURS = 1;
 
 // A `downloading` history row older than this can't still be running — the job
 // registry is in-memory, so a restart strands its row. Generously past the
-// longest plausible download so a slow-but-live one is never retired early. The
-// orphan-directory sweep uses the same window, for the same reason.
+// longest plausible download so a slow-but-live one is never retired early.
 const STALE_DOWNLOADING_MS = 6 * 60 * 60 * 1000;
 
 // A download that finishes *while* the sweep is running is missing from the
@@ -58,11 +52,24 @@ function startCleanupScheduler({ store = null } = {}) {
 
 async function runCleanup(store = null) {
   console.log('🧹 Running cleanup...');
-  // Scan the downloads directory once and reuse the snapshot below: listDownloads
+  // Scan the downloads directory once and reuse the snapshot below: listDownloadDirs
   // is synchronous and stats every download dir, so a second walk would block the
   // event loop twice per sweep for the same answer.
-  const downloads = listDownloads();
-  const result = cleanupOldDownloads(MAX_FILE_AGE_HOURS, downloads);
+  const downloads = listDownloadDirs();
+
+  // Never age out a directory a job in *this* process is actively writing to.
+  // With a store, also spare anything flagged `kept` — the DB is the only
+  // remaining record of that, so a directory can't tell on its own.
+  const skipIds = new Set(runningDownloadIds());
+  if (store) {
+    try {
+      for (const id of await store.keptIds()) skipIds.add(id);
+    } catch (err) {
+      console.error('⚠️ Could not load kept downloads:', err.message);
+    }
+  }
+
+  const result = cleanupOldDownloads(MAX_FILE_AGE_HOURS, { downloads, skipIds });
 
   if (result.expired > 0) {
     console.log(`✅ Expired ${result.expired} old downloads: ${result.expiredIds.join(', ')}`);
@@ -83,7 +90,7 @@ async function runCleanup(store = null) {
       // the same set a fresh scan would report.
       const expiredNow = new Set(result.expiredIds);
       const present = downloads
-        .filter((d) => !d.expired && !expiredNow.has(d.downloadId))
+        .filter((d) => d.files.length > 0 && !expiredNow.has(d.downloadId))
         .map((d) => d.downloadId)
         // The ids become a ::uuid[] parameter, so one non-UUID directory name
         // would abort the whole reconcile with a cast error.
@@ -105,14 +112,6 @@ async function runCleanup(store = null) {
     console.error('⚠️ Cleanup errors:', result.errors);
   }
 
-  // Sweep directories with no metadata.json — debris from a download that died
-  // mid-flight or a subprocess that flushed after its cancel. Nothing lists
-  // them, so this is the only thing that reclaims their disk.
-  const orphans = cleanupOrphanDirs(STALE_DOWNLOADING_MS);
-  if (orphans.removed > 0) {
-    console.log(`🧹 Removed ${orphans.removed} orphaned download dir(s)`);
-  }
-
   // Prune terminal (complete/error) download-job records the manager retains for
   // reconnects, so a long-lived process doesn't accumulate them.
   const prunedJobs = sweepJobs();
@@ -130,9 +129,10 @@ function stopCleanupScheduler() {
   }
 }
 
-// Standalone `npm run cleanup`: filesystem only. No store is registered in this
-// process, so history rows are left to the running server's hourly sweep to
-// reconcile (it re-derives expiry from the media that is now gone).
+// Standalone `npm run cleanup`: filesystem only, driven by directory mtime —
+// there's no store (and so no `kept` to read), so this is a partial sweep;
+// the running server's hourly sweep (which has both) is what reconciles the
+// history rows and honors `kept`.
 if (require.main === module) {
   const result = cleanupOldDownloads(MAX_FILE_AGE_HOURS);
   console.log('Manual cleanup result:', result);

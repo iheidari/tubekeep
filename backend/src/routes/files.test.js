@@ -70,17 +70,13 @@ function as(user, url, init = {}) {
   });
 }
 
-// A real on-disk download: metadata.json + one media file, exactly what the
-// expire/delete/kept helpers in utils/storage operate on. Registered for
-// teardown so the suite leaves the downloads directory as it found it.
+// A real on-disk download: just the media file, exactly what the
+// expire/delete helpers in utils/storage operate on. Registered for teardown
+// so the suite leaves the downloads directory as it found it.
 function onDisk(id) {
   const dir = path.join(downloadsDir, id);
   fs.mkdirSync(dir, { recursive: true });
   tempDirs.push(dir);
-  fs.writeFileSync(
-    path.join(dir, 'metadata.json'),
-    JSON.stringify({ downloadId: id, title: 'A video', filename: 'video.mp4', kept: false }),
-  );
   fs.writeFileSync(path.join(dir, 'video.mp4'), 'x'.repeat(64));
   return dir;
 }
@@ -102,8 +98,6 @@ async function seed(user, { kept = false } = {}) {
   return downloadId;
 }
 
-const readMetadata = (id) =>
-  JSON.parse(fs.readFileSync(path.join(downloadsDir, id, 'metadata.json'), 'utf8'));
 const exists = (id, file) => fs.existsSync(path.join(downloadsDir, id, file));
 
 test('GET /api/files (download list) is private — 401 without a session', async () => {
@@ -146,7 +140,7 @@ test('GET /api/files lists only the session user’s own downloads', async () =>
   );
 });
 
-test('PATCH ?kept=true flips the row and mirrors it into the on-disk metadata the sweep reads', async () => {
+test('PATCH ?kept=true flips the row — the `downloads` row is the only record of it', async () => {
   const id = await seed(ME);
 
   const res = await as(ME, `/api/files/${id}?kept=true`, { method: 'PATCH' });
@@ -154,8 +148,6 @@ test('PATCH ?kept=true flips the row and mirrors it into the on-disk metadata th
   assert.equal(res.status, 200);
   assert.deepEqual((await res.json()).data, { downloadId: id, kept: true });
   assert.equal((await store.findForUser(id, ME.id)).kept, true);
-  // The age-based cleanup sweep reads `kept` from disk, not the DB.
-  assert.equal(readMetadata(id).kept, true);
 });
 
 test('PATCH on another user’s download is 404 and leaves that row untouched', async () => {
@@ -165,10 +157,9 @@ test('PATCH on another user’s download is 404 and leaves that row untouched', 
 
   assert.equal(res.status, 404);
   assert.equal((await store.findForUser(id, THEM.id)).kept, false);
-  assert.equal(readMetadata(id).kept, false);
 });
 
-test('DELETE expires: the row survives as expired, media is dropped, metadata stays', async () => {
+test('DELETE expires: the row survives as expired, the whole directory is dropped', async () => {
   const id = await seed(ME);
 
   const res = await as(ME, `/api/files/${id}`, { method: 'DELETE' });
@@ -176,8 +167,7 @@ test('DELETE expires: the row survives as expired, media is dropped, metadata st
   assert.equal(res.status, 200);
   const row = await store.findForUser(id, ME.id);
   assert.equal(row.expired, true);
-  assert.equal(exists(id, 'video.mp4'), false);
-  assert.equal(exists(id, 'metadata.json'), true);
+  assert.equal(fs.existsSync(path.join(downloadsDir, id)), false);
   // Expired bytes stop counting against the quota.
   assert.equal(await store.usageForUser(ME.id), 0);
 });
