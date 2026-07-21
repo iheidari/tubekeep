@@ -40,14 +40,15 @@ async function requestAs(ip, extraHeaders = {}) {
   });
 }
 
-// Drive `count` requests as `ip`+headers and return the last response — used
-// to walk a bucket right up to (or past) its max: 10 limit.
+// Drive `count` requests as `ip`+headers concurrently — used to walk a bucket
+// right up to its max: 10 limit. Order doesn't matter: the limiter reads/writes
+// its hit map synchronously per request (no `await` in between), so concurrent
+// requests can't race each other into the same slot.
 async function fireN(count, ip, extraHeaders = {}) {
-  let res;
-  for (let i = 0; i < count; i++) {
-    res = await requestAs(ip, extraHeaders);
-  }
-  return res;
+  const responses = await Promise.all(
+    Array.from({ length: count }, () => requestAs(ip, extraHeaders)),
+  );
+  return responses.every((res) => res.status === 200);
 }
 
 before(async () => {
@@ -92,11 +93,15 @@ test('the real server buckets by X-Forwarded-For client, not one shared IP (trus
   const clientB = '203.0.113.202';
 
   // Exhaust A's bucket: 10 allowed, the 11th throttled.
-  const exhausted = await fireN(10, clientA);
-  assert.equal(exhausted.status, 200, 'the 10th request within the limit should still succeed');
+  const allSucceeded = await fireN(10, clientA);
+  assert.ok(allSucceeded, 'all 10 requests within the limit should succeed');
   const blocked = await requestAs(clientA);
   assert.equal(blocked.status, 429, 'the 11th request from the same client should be throttled');
-  assert.equal((await blocked.json()).success, false);
+  const body = await blocked.json();
+  assert.equal(body.success, false);
+  assert.equal(typeof body.error, 'string');
+  const retryAfter = Number(blocked.headers.get('retry-after'));
+  assert.ok(Number.isInteger(retryAfter) && retryAfter > 0 && retryAfter <= 60);
 
   // A fresh client is untouched — proves the real server derives distinct
   // bucket keys per forwarded client instead of collapsing onto one shared
@@ -110,8 +115,8 @@ test('the real server prefers CF-Connecting-IP over X-Forwarded-For (Cloudflare 
   const real1 = '203.0.113.211';
   const real2 = '203.0.113.212';
 
-  const exhausted = await fireN(10, sharedEdge, { 'CF-Connecting-IP': real1 });
-  assert.equal(exhausted.status, 200);
+  const allSucceeded = await fireN(10, sharedEdge, { 'CF-Connecting-IP': real1 });
+  assert.ok(allSucceeded);
   const blocked = await requestAs(sharedEdge, { 'CF-Connecting-IP': real1 });
   assert.equal(blocked.status, 429, 'real1 should be throttled after exhausting its own bucket');
 
@@ -121,18 +126,4 @@ test('the real server prefers CF-Connecting-IP over X-Forwarded-For (Cloudflare 
     200,
     'real2 must get its own bucket despite sharing X-Forwarded-For with real1',
   );
-});
-
-test('a throttled response from the real server carries a JSON 429 body and Retry-After', async () => {
-  const client = '203.0.113.221';
-  await fireN(10, client);
-  const blocked = await requestAs(client);
-
-  assert.equal(blocked.status, 429);
-  const body = await blocked.json();
-  assert.equal(body.success, false);
-  assert.equal(typeof body.error, 'string');
-
-  const retryAfter = Number(blocked.headers.get('retry-after'));
-  assert.ok(Number.isInteger(retryAfter) && retryAfter > 0 && retryAfter <= 60);
 });

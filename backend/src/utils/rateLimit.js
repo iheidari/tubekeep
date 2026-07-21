@@ -8,11 +8,14 @@ function rateLimit({ windowMs = 60_000, max = 30, message = 'Too many requests' 
 
   return (req, res, next) => {
     const now = Date.now();
-    // Prefer CF-Connecting-IP: Cloudflare sets/overwrites this at its edge, so
-    // it can't be spoofed by a client going through Cloudflare, and it's right
-    // regardless of whether `trust proxy` matches the actual hop count. Falls
-    // back to req.ip (correct once `trust proxy` is set — see server.js) for
-    // local dev and any deploy not sitting behind Cloudflare.
+    // Prefer CF-Connecting-IP as the primary signal: Cloudflare overwrites it
+    // at its edge, so it's trustworthy even though X-Forwarded-For (what
+    // req.ip resolves from once `trust proxy` is set — see server.js) is
+    // client-supplied content Cloudflare *appends to* rather than replaces —
+    // a request that never touched Cloudflare can walk in with an arbitrary
+    // forged X-Forwarded-For chain. req.ip is the fallback for local dev and
+    // any deploy that isn't behind Cloudflare, where no CF-Connecting-IP
+    // header exists at all.
     const ip = req.headers['cf-connecting-ip'] || req.ip || req.socket?.remoteAddress || 'unknown';
 
     const recent = (hits.get(ip) || []).filter((t) => now - t < windowMs);
