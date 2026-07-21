@@ -90,12 +90,26 @@ async function runCleanup(store = null) {
       // this one is correct for a row with finished media on disk. A download
       // that hasn't finished (no metadata.json yet) is absent from `downloads`
       // entirely, so a genuinely in-flight job is untouched here.
+      //
+      // Pre-filter to rows that are actually `downloading` in the DB first —
+      // normally none, and never more than a handful — instead of stat-ing
+      // and updating every live download on disk each sweep. Unlike
+      // expireMissing/failStale below, this can't be one bulk UPDATE: it
+      // needs a distinct on-disk filename/size per row, which only exists
+      // after reading the filesystem.
+      const downloadingIds = new Set(await store.downloadingIds());
       let strandedComplete = 0;
       for (const d of downloads) {
-        if (d.expired || !d.filename) continue;
+        if (!d.filename || !downloadingIds.has(d.downloadId)) continue;
         const size = getDownloadFileSize(d.downloadId, d.filename);
         if (size === null) continue; // metadata names a file that isn't actually there
-        if (await store.completeStale(d.downloadId, { filename: d.filename, filesize: size })) {
+        if (
+          await store.markComplete(
+            d.downloadId,
+            { filename: d.filename, filesize: size },
+            { onlyIfDownloading: true },
+          )
+        ) {
           strandedComplete++;
         }
       }

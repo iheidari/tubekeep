@@ -95,40 +95,40 @@ function createStore(query) {
     },
 
     // The job finished: record the real filename and the ACTUAL byte size (the
-    // size used at insert time came from the untrusted client-supplied estimate).
-    async markComplete(downloadId, { filename, filesize }) {
-      await query(
+    // size used at insert time came from the untrusted client-supplied
+    // estimate). `onlyIfDownloading` is for the cleanup sweep's reconcile
+    // (see cleanup.js): a `downloading` row whose completion hook's write was
+    // lost even though the job actually finished — the media is already on
+    // disk. With it set, this is a no-op (returns false) unless the row is
+    // still `downloading`, so calling it on an already-resolved row changes
+    // nothing. Without it (the normal completion path), it always applies and
+    // the return value is unused.
+    async markComplete(downloadId, { filename, filesize }, { onlyIfDownloading = false } = {}) {
+      const { rowCount } = await query(
         `UPDATE downloads
             SET status = 'complete',
                 completed_at = now(),
                 filename = $2,
                 filesize = coalesce($3, filesize)
-          WHERE download_id = $1`,
+          WHERE download_id = $1 ${onlyIfDownloading ? "AND status = 'downloading'" : ''}`,
         [downloadId, filename ?? null, filesize ?? null],
       );
+      return rowCount > 0;
     },
 
     async markFailed(downloadId) {
       await query("UPDATE downloads SET status = 'failed' WHERE download_id = $1", [downloadId]);
     },
 
-    // Correct a `downloading` row whose completion hook's write was lost even
-    // though the job actually finished — the media is already on disk (see
-    // cleanup.js's reconcile step, which runs this before failStale). Same
-    // idempotent-UPDATE shape as markFailed/failStale: a no-op (false) if the
-    // row is no longer `downloading` (already complete, failed, or otherwise
-    // resolved), so calling it on a healthy row changes nothing.
-    async completeStale(downloadId, { filename, filesize }) {
-      const { rowCount } = await query(
-        `UPDATE downloads
-            SET status = 'complete',
-                completed_at = now(),
-                filename = $2,
-                filesize = $3
-          WHERE download_id = $1 AND status = 'downloading'`,
-        [downloadId, filename ?? null, filesize ?? null],
+    // The small, normally-empty set of rows the cleanup sweep's reconcile
+    // needs to even consider — lets it skip stat-ing and updating every live
+    // download on disk each hour and only look at ones that could possibly be
+    // stranded. See cleanup.js.
+    async downloadingIds() {
+      const { rows } = await query(
+        "SELECT download_id FROM downloads WHERE status = 'downloading'",
       );
-      return rowCount > 0;
+      return rows.map((r) => r.download_id);
     },
 
     // Reconcile history against the filesystem: every completed, still-live row
@@ -279,26 +279,22 @@ function createMemoryStore({ rows = [] } = {}) {
       }
       return used;
     },
-    async markComplete(downloadId, { filename, filesize }) {
+    async markComplete(downloadId, { filename, filesize }, { onlyIfDownloading = false } = {}) {
       const row = byId.get(downloadId);
-      if (!row) return;
+      if (!row) return false;
+      if (onlyIfDownloading && row.status !== 'downloading') return false;
       row.status = 'complete';
       row.completed_at = new Date();
       row.filename = filename ?? null;
       if (filesize !== null && filesize !== undefined) row.filesize = filesize;
+      return true;
     },
     async markFailed(downloadId) {
       const row = byId.get(downloadId);
       if (row) row.status = 'failed';
     },
-    async completeStale(downloadId, { filename, filesize }) {
-      const row = byId.get(downloadId);
-      if (row?.status !== 'downloading') return false;
-      row.status = 'complete';
-      row.completed_at = new Date();
-      row.filename = filename ?? null;
-      row.filesize = filesize ?? null;
-      return true;
+    async downloadingIds() {
+      return [...byId.values()].filter((r) => r.status === 'downloading').map((r) => r.download_id);
     },
     async expireMissing(presentIds, graceMs = 0) {
       const present = new Set(presentIds || []);

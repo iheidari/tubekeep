@@ -144,12 +144,16 @@ test('expireMissing spares rows younger than the grace window', async () => {
   assert.equal((await store.findForUser('longGone', USER)).expired, true);
 });
 
-test('completeStale reconciles a stranded downloading row to complete, from the real file', async () => {
+test('markComplete({ onlyIfDownloading: true }) reconciles a stranded row from the real file', async () => {
   const store = createMemoryStore();
   await store.insert({ downloadId: 'stranded', userId: USER, filesize: 100 });
 
   assert.equal(
-    await store.completeStale('stranded', { filename: 'real.mp4', filesize: 999 }),
+    await store.markComplete(
+      'stranded',
+      { filename: 'real.mp4', filesize: 999 },
+      { onlyIfDownloading: true },
+    ),
     true,
   );
 
@@ -161,13 +165,36 @@ test('completeStale reconciles a stranded downloading row to complete, from the 
   assert.equal(await store.usageForUser(USER), 999);
 });
 
-test('completeStale is a no-op for a row that is not (or no longer) downloading', async () => {
+test('markComplete({ onlyIfDownloading: true }) is a no-op for a row that is not (or no longer) downloading', async () => {
   const store = createMemoryStore();
   await seed(store, 'alreadyDone', USER, 100);
   await store.markFailed('alreadyDone'); // pretend it raced with something else
 
-  assert.equal(await store.completeStale('alreadyDone', { filename: 'x.mp4', filesize: 1 }), false);
-  assert.equal(await store.completeStale('missing', { filename: 'x.mp4', filesize: 1 }), false);
+  assert.equal(
+    await store.markComplete(
+      'alreadyDone',
+      { filename: 'x.mp4', filesize: 1 },
+      { onlyIfDownloading: true },
+    ),
+    false,
+  );
+  assert.equal(
+    await store.markComplete(
+      'missing',
+      { filename: 'x.mp4', filesize: 1 },
+      { onlyIfDownloading: true },
+    ),
+    false,
+  );
+});
+
+test('downloadingIds returns only rows currently downloading', async () => {
+  const store = createMemoryStore();
+  await store.insert({ downloadId: 'a', userId: USER, filesize: 100 });
+  await seed(store, 'b', USER, 100); // completed via seed()
+  await store.insert({ downloadId: 'c', userId: USER, filesize: 100 });
+
+  assert.deepEqual((await store.downloadingIds()).sort(), ['a', 'c']);
 });
 
 test('failStale retires downloads stranded by a restart, sparing recent ones', async () => {
