@@ -71,20 +71,38 @@ export async function fetchDownloads(apiUrl) {
   return data.data
 }
 
-// Storage state for the format-screen banner + fit checks. Returns null on any
-// failure so the UI degrades to "no banner, nothing blocked" rather than
-// breaking the format list. Shape: { total, free, used, sizeMultiplier,
-// headroomBytes, quota: { used, max, remaining } } — the server's disk plus this
-// user's allowance, with the fit knobs the backend owns.
-export async function fetchDisk(apiUrl) {
+// Unwrap the `{ success, data }` envelope for the read-only endpoints whose
+// callers degrade gracefully: null on a network error, a non-JSON body, or an
+// unsuccessful response. Written once so the envelope shape lives in one place.
+// `fetcher` defaults to the credentialed apiFetch; public endpoints pass plain
+// `fetch` so a 401 can't be broadcast as a session expiry.
+async function fetchData(url, fetcher = apiFetch) {
   try {
-    const res = await apiFetch(`${apiUrl}/api/disk`)
+    const res = await fetcher(url)
     const data = await res.json()
     if (!data.success || !data.data) return null
     return data.data
   } catch {
     return null
   }
+}
+
+// Public per-item metadata for a download, keyed only by its id — resolves a
+// /play/:id share link for someone who isn't the owner (or isn't logged in).
+// No credentials needed; the endpoint is public. Returns null on any failure
+// (unknown id, network error) so the caller falls back to a "missing" state.
+export function fetchDownloadMeta(apiUrl, downloadId) {
+  // Bare `fetch`, wrapped so it keeps its global `this` binding.
+  return fetchData(`${apiUrl}/api/files/meta/${downloadId}`, (url) => fetch(url))
+}
+
+// Storage state for the format-screen banner + fit checks. Returns null on any
+// failure so the UI degrades to "no banner, nothing blocked" rather than
+// breaking the format list. Shape: { total, free, used, sizeMultiplier,
+// headroomBytes, quota: { used, max, remaining } } — the server's disk plus this
+// user's allowance, with the fit knobs the backend owns.
+export function fetchDisk(apiUrl) {
+  return fetchData(`${apiUrl}/api/disk`)
 }
 
 // Whether a download of `filesize` bytes fits within the server's disk margin.

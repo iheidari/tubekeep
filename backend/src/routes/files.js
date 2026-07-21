@@ -9,6 +9,28 @@ const {
   setKept,
 } = require('../utils/storage');
 const { cancelJob } = require('../services/downloadManager');
+const { rateLimit } = require('../utils/rateLimit');
+const { hasLocalMedia } = require('../services/downloadsStore');
+
+// Public per-item metadata (0XC-112): project a store row down to only what a
+// share-link recipient needs, never an owner detail (no user_id, email, url,
+// size, status). `filename` is withheld — and the row reported unavailable —
+// whenever there's no local media to serve: still downloading, failed, moved
+// to the owner's own cloud, or already expired. The recipient already holds
+// the id, so collapsing all of these to one `expired: true` shape leaks
+// nothing new; it just tells the player "not playable here" without
+// distinguishing *why* for a non-owner.
+function toPublicMeta(row) {
+  const ready = hasLocalMedia(row);
+  return {
+    downloadId: row.downloadId,
+    title: row.title,
+    thumbnail: row.thumbnail,
+    type: row.type,
+    filename: ready ? row.filename : null,
+    expired: !ready,
+  };
+}
 
 // RFC 5987 encoding for unicode filenames in Content-Disposition header
 function encodeRFC5987(filename) {
@@ -35,7 +57,34 @@ function getContentDisposition(filename, isDownload) {
 function createFilesRouter(requireAuth, { store }) {
   const router = express.Router();
 
-  // PUBLIC: byte-range media serving. Declared FIRST, above the requireAuth choke
+  const notFound = (res) => res.status(404).json({ success: false, error: 'Download not found' });
+
+  // PUBLIC: single-item metadata for a /play/:id share link (0XC-112). Declared
+  // FIRST — ahead of the `/:downloadId/:filename` serve route below, which would
+  // otherwise swallow it: `meta/<id>` is the same two-segment shape as
+  // `<downloadId>/<filename>`, so without this ordering it would match there
+  // first as downloadId="meta" (an invalid UUID) and 404 before ever reaching
+  // this handler. A real download whose filename happens to be "meta" is
+  // unaffected either way, since its first segment is the download's UUID, not
+  // the literal "meta". Also declared above the requireAuth choke below, since
+  // the whole point is resolving a link for someone with no session.
+  // Looser than the auth-adjacent limiters (this never touches yt-dlp or the
+  // filesystem) but still capped so an id can't be scanned unboundedly.
+  router.get('/meta/:downloadId', rateLimit({ windowMs: 60_000, max: 120 }), async (req, res) => {
+    const { downloadId } = req.params;
+    if (!isValidDownloadId(downloadId)) return notFound(res);
+
+    try {
+      const row = await store.findById(downloadId);
+      if (!row) return notFound(res);
+      res.json({ success: true, data: toPublicMeta(row) });
+    } catch (error) {
+      console.error('❌ Public metadata lookup error:', error.message);
+      res.status(500).json({ success: false, error: 'Failed to load download metadata' });
+    }
+  });
+
+  // PUBLIC: byte-range media serving. Declared above the requireAuth choke
   // below, so it stays reachable without a session — shared `/play/:id` links play
   // for recipients who never logged in (see 0XC-97). Every route defined after the
   // choke is private by default, so a new route can't accidentally leak.
@@ -145,8 +194,6 @@ function createFilesRouter(requireAuth, { store }) {
   // per-route) makes private the default: any route added after this line is
   // auth-gated automatically, and only the public serve route above is exempt.
   router.use(requireAuth);
-
-  const notFound = (res) => res.status(404).json({ success: false, error: 'Download not found' });
 
   // The download LIST is private and per-user: it comes from the `downloads`
   // table scoped to the session's user, not from a scan of the downloads

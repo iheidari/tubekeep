@@ -50,9 +50,30 @@ function isSupportedUrl(value) {
   }
 }
 
+// On a network that advertises an IPv6 default route but black-holes IPv6
+// traffic, every yt-dlp call stalls ~80s: Python's urllib has no Happy Eyeballs,
+// so it waits out the full TCP timeout on each AAAA address before falling back
+// to IPv4. Setting YTDLP_FORCE_IPV4=true skips the AAAA attempt entirely (~1.5s
+// instead of ~85s). Opt-in, not default — it would break an IPv6-only host.
+const FORCE_IPV4 = process.env.YTDLP_FORCE_IPV4 === 'true';
+
+if (FORCE_IPV4) {
+  console.log('🔧 yt-dlp: forcing IPv4 (YTDLP_FORCE_IPV4=true)');
+}
+
+// Flags that must be on EVERY invocation. Owned here, at the single spawn
+// chokepoint, rather than remembered at each call site — a new call site that
+// forgot `--extractor-args` would silently regress YouTube to the broken
+// 360p/hang path. Prepended, not appended: the URL is always the last argument.
+function universalArgs() {
+  const prefix = FORCE_IPV4 ? ['--force-ipv4'] : [];
+  return [...prefix, '--extractor-args', YOUTUBE_EXTRACTOR_ARGS];
+}
+
 function runYtDlp(args, options = {}) {
+  const finalArgs = [...universalArgs(), ...args];
   return new Promise((resolve, reject) => {
-    const ytDlp = spawn(options.binary || ytDlpBin, args, {
+    const ytDlp = spawn(options.binary || ytDlpBin, finalArgs, {
       // `binary` is a test-injection seam; production always uses ytDlpBin.
       // `??` (not `||`) so an explicit `timeout: 0` can disable the cap entirely.
       timeout: options.timeout ?? METADATA_TIMEOUT_MS,
@@ -100,14 +121,7 @@ function runYtDlp(args, options = {}) {
 }
 
 async function fetchYouTubeInfo(url) {
-  const { stdout } = await runYtDlp([
-    '--extractor-args',
-    YOUTUBE_EXTRACTOR_ARGS,
-    '--dump-json',
-    '--no-download',
-    '--no-playlist',
-    url,
-  ]);
+  const { stdout } = await runYtDlp(['--dump-json', '--no-download', '--no-playlist', url]);
   return JSON.parse(stdout);
 }
 
@@ -316,8 +330,6 @@ async function downloadVideo(
       : `${formatId}/best`;
 
     const args = [
-      '--extractor-args',
-      YOUTUBE_EXTRACTOR_ARGS,
       '-f',
       formatString,
       '-o',
@@ -366,8 +378,6 @@ async function downloadAudio(url, formatId, downloadId, onProgress, signal) {
   try {
     await runDownloadWithRetry(
       [
-        '--extractor-args',
-        YOUTUBE_EXTRACTOR_ARGS,
         '-f',
         formatString,
         '-o',

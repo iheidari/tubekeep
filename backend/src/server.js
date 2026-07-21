@@ -24,7 +24,8 @@ const { createStore } = require('./services/authStore');
 const { createStore: createDownloadsStore } = require('./services/downloadsStore');
 const { createRequireAuth } = require('./middleware/requireAuth');
 const mailer = require('./services/mailer');
-const { query } = require('./db');
+const { query, getPool } = require('./db');
+const { applySchema } = require('./dbInit');
 const { startCleanupScheduler } = require('./services/cleanup');
 const { downloadsDir } = require('./utils/storage');
 const { rateLimit } = require('./utils/rateLimit');
@@ -193,11 +194,33 @@ app.use((err, _req, res, _next) => {
   });
 });
 
-startCleanupScheduler({ store: downloadsStore });
+// Apply schema.sql (idempotent) before accepting traffic, so a database
+// missing a column a later commit added self-heals with no manual `db:init`
+// step (0XC-115). Skipped with no DATABASE_URL (unit tests, offline dev) —
+// db.js's pool is created lazily, so importing it here doesn't connect on its
+// own. A failure is fatal in production (mirrors the JWT_SECRET check above);
+// in development it's a loud warning so working offline still boots.
+async function ensureSchema() {
+  if (!process.env.DATABASE_URL) return;
+  try {
+    await applySchema(getPool());
+    console.log('✅ Database schema up to date.');
+  } catch (err) {
+    console.error('❌ Failed to apply database schema:', err.message);
+    if (process.env.NODE_ENV === 'production') {
+      process.exit(1);
+    }
+    console.warn('⚠️  Continuing without a verified schema (development only).');
+  }
+}
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`📁 Downloads directory: ${downloadsDir}`);
+ensureSchema().then(() => {
+  startCleanupScheduler({ store: downloadsStore });
+
+  app.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${PORT}`);
+    console.log(`📁 Downloads directory: ${downloadsDir}`);
+  });
 });
 
 module.exports = app;

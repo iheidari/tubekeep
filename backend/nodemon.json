@@ -1,0 +1,6 @@
+{
+  "//": "Nodemon defaults to watching the entire cwd for .js/.json changes. That includes downloads/, where every completed job writes <downloadId>/metadata.json — so finishing a download restarted the server, killing the SSE stream, the in-memory job registry and any in-flight request (the browser reports the dropped connection as a CORS failure with a null status). Watch only the source tree.",
+  "watch": ["src"],
+  "ext": "js,json",
+  "ignore": ["src/**/*.test.js", "downloads"]
+}
