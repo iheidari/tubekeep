@@ -112,6 +112,25 @@ function createStore(query) {
       await query("UPDATE downloads SET status = 'failed' WHERE download_id = $1", [downloadId]);
     },
 
+    // Correct a `downloading` row whose completion hook's write was lost even
+    // though the job actually finished — the media is already on disk (see
+    // cleanup.js's reconcile step, which runs this before failStale). Same
+    // idempotent-UPDATE shape as markFailed/failStale: a no-op (false) if the
+    // row is no longer `downloading` (already complete, failed, or otherwise
+    // resolved), so calling it on a healthy row changes nothing.
+    async completeStale(downloadId, { filename, filesize }) {
+      const { rowCount } = await query(
+        `UPDATE downloads
+            SET status = 'complete',
+                completed_at = now(),
+                filename = $2,
+                filesize = $3
+          WHERE download_id = $1 AND status = 'downloading'`,
+        [downloadId, filename ?? null, filesize ?? null],
+      );
+      return rowCount > 0;
+    },
+
     // Reconcile history against the filesystem: every completed, still-live row
     // whose media is NOT in `presentIds` has lost its files (aged out by the
     // sweep, removed by the standalone cleanup CLI, or deleted by hand) and is
@@ -271,6 +290,15 @@ function createMemoryStore({ rows = [] } = {}) {
     async markFailed(downloadId) {
       const row = byId.get(downloadId);
       if (row) row.status = 'failed';
+    },
+    async completeStale(downloadId, { filename, filesize }) {
+      const row = byId.get(downloadId);
+      if (row?.status !== 'downloading') return false;
+      row.status = 'complete';
+      row.completed_at = new Date();
+      row.filename = filename ?? null;
+      row.filesize = filesize ?? null;
+      return true;
     },
     async expireMissing(presentIds, graceMs = 0) {
       const present = new Set(presentIds || []);

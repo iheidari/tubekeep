@@ -124,6 +124,22 @@ function getDownloadFilePath(downloadId, filename) {
 // Create (idempotently) the per-download directory and return its path. The
 // only place the download-dir layout is minted, so callers never join paths
 // under downloadsDir themselves.
+// Actual on-disk byte size of a download's declared result file, or null if
+// it's missing (metadata names a file that isn't actually there — e.g. a
+// partial download). Reuses getDownloadFilePath's validation/traversal guard,
+// so callers get the same "confirmed to exist as a file" contract. Used by the
+// cleanup reconcile (see cleanup.js) to trust the real file over a stale or
+// client-estimated size.
+function getDownloadFileSize(downloadId, filename) {
+  const filePath = getDownloadFilePath(downloadId, filename);
+  if (!filePath) return null;
+  try {
+    return fs.statSync(filePath).size;
+  } catch {
+    return null;
+  }
+}
+
 function ensureDownloadDir(downloadId) {
   if (!isValidDownloadId(downloadId)) {
     throw new Error(`Invalid downloadId: ${downloadId}`);
@@ -329,6 +345,7 @@ module.exports = {
   getDownload,
   listDownloads,
   getDownloadFilePath,
+  getDownloadFileSize,
   ensureDownloadDir,
   deleteDownload,
   expireDownload,

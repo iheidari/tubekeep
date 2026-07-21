@@ -3,6 +3,7 @@ const {
   cleanupOrphanDirs,
   listDownloads,
   isValidDownloadId,
+  getDownloadFileSize,
 } = require('../utils/storage');
 const { sweepJobs } = require('./downloadManager');
 
@@ -76,6 +77,34 @@ async function runCleanup(store = null) {
   // standalone CLI without a database, where this is a no-op.
   if (store) {
     try {
+      // A download whose media landed on disk must never end up recorded as
+      // failed. metadata.json is written synchronously right before the job's
+      // completion hook runs (downloadManager.js), so a `downloading` row
+      // whose directory already holds the finished file didn't fail — the
+      // hook's DB write was lost (e.g. a transient error), not the download.
+      // Detect it from the disk snapshot already taken above and correct the
+      // row from the real file, not a stale/client-estimated size.
+      //
+      // This MUST run before failStale below: on the same sweep, whichever
+      // runs first wins the race for a row that qualifies for both, and only
+      // this one is correct for a row with finished media on disk. A download
+      // that hasn't finished (no metadata.json yet) is absent from `downloads`
+      // entirely, so a genuinely in-flight job is untouched here.
+      let strandedComplete = 0;
+      for (const d of downloads) {
+        if (d.expired || !d.filename) continue;
+        const size = getDownloadFileSize(d.downloadId, d.filename);
+        if (size === null) continue; // metadata names a file that isn't actually there
+        if (await store.completeStale(d.downloadId, { filename: d.filename, filesize: size })) {
+          strandedComplete++;
+        }
+      }
+      if (strandedComplete > 0) {
+        console.log(
+          `🧹 Reconciled ${strandedComplete} stranded download(s) that had already finished`,
+        );
+      }
+
       // Reconcile against what is actually still on disk, so rows also expire
       // when the files went away by some other route (standalone `npm run
       // cleanup`, a manual rm) — not just when this run expired them. Derived

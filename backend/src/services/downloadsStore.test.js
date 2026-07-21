@@ -144,6 +144,32 @@ test('expireMissing spares rows younger than the grace window', async () => {
   assert.equal((await store.findForUser('longGone', USER)).expired, true);
 });
 
+test('completeStale reconciles a stranded downloading row to complete, from the real file', async () => {
+  const store = createMemoryStore();
+  await store.insert({ downloadId: 'stranded', userId: USER, filesize: 100 });
+
+  assert.equal(
+    await store.completeStale('stranded', { filename: 'real.mp4', filesize: 999 }),
+    true,
+  );
+
+  const row = await store.findForUser('stranded', USER);
+  assert.equal(row.status, 'complete');
+  assert.equal(row.filename, 'real.mp4');
+  assert.equal(row.size, 999);
+  // The corrected size now counts toward the user's quota.
+  assert.equal(await store.usageForUser(USER), 999);
+});
+
+test('completeStale is a no-op for a row that is not (or no longer) downloading', async () => {
+  const store = createMemoryStore();
+  await seed(store, 'alreadyDone', USER, 100);
+  await store.markFailed('alreadyDone'); // pretend it raced with something else
+
+  assert.equal(await store.completeStale('alreadyDone', { filename: 'x.mp4', filesize: 1 }), false);
+  assert.equal(await store.completeStale('missing', { filename: 'x.mp4', filesize: 1 }), false);
+});
+
 test('failStale retires downloads stranded by a restart, sparing recent ones', async () => {
   const store = createMemoryStore();
   await store.insert({ downloadId: 'fresh', userId: USER, filesize: 100 });
