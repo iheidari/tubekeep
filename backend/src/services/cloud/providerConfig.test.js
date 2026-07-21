@@ -33,7 +33,7 @@ test('googledrive getPublicConfig publishes clientId', () => {
   });
 });
 
-test('neither provider exports the dead CloudError (nothing imports it; jobs.js duck-types err.code)', () => {
+test('neither provider re-exports CloudError (it is shared.js-internal now)', () => {
   const dropbox = require('./dropbox');
   const googledrive = require('./googledrive');
   assert.equal(dropbox.CloudError, undefined);

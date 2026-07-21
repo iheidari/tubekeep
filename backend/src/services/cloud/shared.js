@@ -1,7 +1,13 @@
 // Shared helpers for cloud providers (Dropbox, Google Drive, ...): the
 // classified error type, the OAuth token-endpoint POST, the transient-failure
-// retry wrapper, and the refresh-token shell every provider's exchange/upload
-// path builds on.
+// retry wrapper, the refresh-token shell every provider's exchange/upload path
+// builds on, the upload chunk size, and the fractional-progress reporter.
+
+// Both providers currently chunk uploads in a matching 8 MB stride — Dropbox's
+// documented single-shot/session cutoff sweet spot, and a size Google Drive's
+// resumable API accepts (any multiple of 256 KB) — so it's one constant rather
+// than two literals that could quietly drift apart.
+const DEFAULT_CHUNK_SIZE = 8 * 1024 * 1024;
 
 // A CloudError carries a machine-readable `code` so the route/UI can react
 // (e.g. quota → offer "download instead", auth → prompt reconnect). `status`
@@ -32,8 +38,10 @@ async function postToken(endpoint, params, errorLabel) {
   return body;
 }
 
-// refresh-token → fresh access token. Neither provider rotates the refresh
-// token, and both post the same four fields to their own token endpoint.
+// refresh-token → fresh access token, posting the standard OAuth
+// refresh_token grant fields to the given endpoint. Whether a provider
+// rotates the refresh token is its own concern, asserted in its own file —
+// this shell just relays whatever the token endpoint returns.
 async function refresh({ endpoint, refreshToken, clientId, clientSecret, errorLabel }) {
   const body = await postToken(
     endpoint,
@@ -77,4 +85,23 @@ async function withRetry(fn, { signal }) {
   throw lastErr;
 }
 
-module.exports = { CloudError, postToken, refresh, withRetry };
+// Build a fractional-progress reporter: `uploaded` bytes against a known
+// `total`, calling `onProgress` if provided. Shared so every provider reports
+// progress identically — an unknown/zero total reports 100 rather than
+// dividing by zero, and the result is always clamped to 100.
+function makeProgressReporter(total, onProgress) {
+  return (uploaded) => {
+    if (typeof onProgress === 'function') {
+      onProgress(total > 0 ? Math.min(100, (uploaded / total) * 100) : 100);
+    }
+  };
+}
+
+module.exports = {
+  CloudError,
+  postToken,
+  refresh,
+  withRetry,
+  DEFAULT_CHUNK_SIZE,
+  makeProgressReporter,
+};

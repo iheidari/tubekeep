@@ -1,5 +1,12 @@
 const fs = require('node:fs');
-const { CloudError, postToken, refresh: sharedRefresh, withRetry } = require('./shared');
+const {
+  CloudError,
+  postToken,
+  refresh: sharedRefresh,
+  withRetry,
+  DEFAULT_CHUNK_SIZE,
+  makeProgressReporter,
+} = require('./shared');
 
 // --- Google Drive "Move to cloud" provider --------------------------------
 // Implements the same CloudProvider shape as dropbox.js, consumed by
@@ -19,8 +26,9 @@ const DRIVE_FILES_ENDPOINT = 'https://www.googleapis.com/drive/v3/files';
 const DRIVE_UPLOAD_ENDPOINT = 'https://www.googleapis.com/upload/drive/v3/files';
 
 // Resumable-upload chunks must be a multiple of 256 KB (except the final one).
-// 8 MB (= 32 × 256 KB) matches the Dropbox provider's streaming granularity.
-const CHUNK_SIZE = 8 * 1024 * 1024;
+// shared.js's DEFAULT_CHUNK_SIZE (8 MB = 32 × 256 KB) matches the Dropbox
+// provider's streaming granularity.
+const CHUNK_SIZE = DEFAULT_CHUNK_SIZE;
 
 const CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 const CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET;
@@ -171,12 +179,7 @@ async function putChunk({ sessionUri, chunk, range, signal }) {
 // Returns { path, name, link }.
 async function upload({ accessToken, filePath, fileName, size, onProgress, signal }) {
   const total = typeof size === 'number' ? size : fs.statSync(filePath).size;
-
-  const report = (uploaded) => {
-    if (typeof onProgress === 'function') {
-      onProgress(total > 0 ? Math.min(100, (uploaded / total) * 100) : 100);
-    }
-  };
+  const report = makeProgressReporter(total, onProgress);
 
   const folderId = await withRetry(() => findOrCreateFolder(accessToken, signal), { signal });
   const sessionUri = await withRetry(

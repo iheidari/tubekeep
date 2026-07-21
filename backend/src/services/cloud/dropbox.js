@@ -1,6 +1,13 @@
 const fs = require('node:fs');
 const { Dropbox } = require('dropbox');
-const { CloudError, postToken, refresh: sharedRefresh, withRetry } = require('./shared');
+const {
+  CloudError,
+  postToken,
+  refresh: sharedRefresh,
+  withRetry,
+  DEFAULT_CHUNK_SIZE,
+  makeProgressReporter,
+} = require('./shared');
 
 // --- Dropbox "Move to cloud" provider -------------------------------------
 // Implements the CloudProvider shape consumed by services/cloud/index.js:
@@ -12,9 +19,10 @@ const { CloudError, postToken, refresh: sharedRefresh, withRetry } = require('./
 
 const TOKEN_ENDPOINT = 'https://api.dropboxapi.com/oauth2/token';
 
-// Dropbox allows a 150 MB single-shot upload, but 8 MB is the documented sweet
-// spot for streaming; anything larger goes through an upload session.
-const CHUNK_SIZE = 8 * 1024 * 1024;
+// Dropbox allows a 150 MB single-shot upload, but 8 MB (shared.js's
+// DEFAULT_CHUNK_SIZE) is the documented sweet spot for streaming; anything
+// larger goes through an upload session.
+const CHUNK_SIZE = DEFAULT_CHUNK_SIZE;
 
 const APP_KEY = process.env.DROPBOX_APP_KEY;
 const APP_SECRET = process.env.DROPBOX_APP_SECRET;
@@ -108,12 +116,7 @@ async function upload({ accessToken, filePath, fileName, size, onProgress, signa
   const dropboxPath = `/${fileName}`;
   const total = typeof size === 'number' ? size : fs.statSync(filePath).size;
   const commit = { path: dropboxPath, mode: 'add', autorename: true, mute: true };
-
-  const report = (uploaded) => {
-    if (typeof onProgress === 'function') {
-      onProgress(total > 0 ? Math.min(100, (uploaded / total) * 100) : 100);
-    }
-  };
+  const report = makeProgressReporter(total, onProgress);
 
   try {
     let result;

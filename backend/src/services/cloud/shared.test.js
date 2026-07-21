@@ -1,7 +1,7 @@
 const { test, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 
-const { CloudError, postToken, refresh, withRetry } = require('./shared');
+const { CloudError, postToken, refresh, withRetry, makeProgressReporter } = require('./shared');
 
 // Stub global.fetch per test; restored after each so other suites (which may
 // hit the real network) are unaffected.
@@ -184,4 +184,25 @@ test('withRetry classifies an AbortError thrown mid-flight as "aborted" without 
     },
   );
   assert.equal(calls, 1);
+});
+
+test('makeProgressReporter reports a percentage of the known total, clamped to 100', () => {
+  const seen = [];
+  const report = makeProgressReporter(200, (pct) => seen.push(pct));
+  report(50);
+  report(200);
+  report(250); // past total (e.g. a final chunk rounding up) still clamps
+  assert.deepEqual(seen, [25, 100, 100]);
+});
+
+test('makeProgressReporter reports 100 when total is unknown or zero', () => {
+  const seen = [];
+  const report = makeProgressReporter(0, (pct) => seen.push(pct));
+  report(0);
+  assert.deepEqual(seen, [100]);
+});
+
+test('makeProgressReporter is a no-op when onProgress is not a function', () => {
+  const report = makeProgressReporter(100, undefined);
+  assert.doesNotThrow(() => report(50));
 });
