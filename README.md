@@ -168,7 +168,7 @@ RESEND_API_KEY=              # unset in dev → magic link is logged to the cons
 EMAIL_FROM=Tubekeep <login@yourdomain>
 ```
 
-Login is an emailed single-use magic link (JWT httpOnly cookie session). Users are managed by hand in the Neon `users` table — there is no signup. Apply the schema once with `cd backend && npm run db:init`. All API routes require a session **except** the public `GET /api/files/:id/:filename` media route, so share links keep working.
+Login is an emailed single-use magic link (JWT httpOnly cookie session). Users are managed by hand in the Neon `users` table — there is no signup. The backend applies `schema.sql` automatically on every boot when `DATABASE_URL` is set (idempotent — safe to re-run, and self-heals a database missing a column a later commit added); `cd backend && npm run db:init` still works standalone if you want to provision a fresh database by hand ahead of time. All API routes require a session **except** the public `GET /api/files/:id/:filename` media route, so share links keep working.
 
 **frontend/.env:**
 ```env
@@ -333,7 +333,7 @@ pip install yt-dlp
 
 ### History looks empty or out of date
 - History lives in Postgres, scoped to your account — make sure you're logged in as the right user
-- Confirm `DATABASE_URL` is set and the schema is applied (`cd backend && npm run db:init`)
+- Confirm `DATABASE_URL` is set — the schema applies itself on boot, but check the server log for `❌ Failed to apply database schema` (fatal in production, a warning in development); `cd backend && npm run db:init` re-applies it by hand if needed
 - Look for `❌ Server sync error` in the browser console, or a 401 (expired session — log in again)
 
 ### "Not enough storage in your account" when starting a download
