@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { usePlayer } from '../context/usePlayer'
 
 const SPEEDS = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]
+const MENU_HANDLED_KEYS = new Set(['Escape', 'ArrowDown', 'ArrowUp', 'Home', 'End'])
 
 // Playback-speed picker for the shared media element. Reads/sets the rate through
 // the player context so the choice survives the element moving between stage and
@@ -14,14 +15,17 @@ function PlaybackSpeed() {
   const triggerRef = useRef(null)
   const optionRefs = useRef([])
 
+  // Shared by both outside-interaction effects below.
+  const isOutside = useCallback((target) => ref.current && !ref.current.contains(target), [])
+
   useEffect(() => {
     if (!open) return
     const onDown = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+      if (isOutside(e.target)) setOpen(false)
     }
     document.addEventListener('pointerdown', onDown)
     return () => document.removeEventListener('pointerdown', onDown)
-  }, [open])
+  }, [open, isOutside])
 
   // Tabbing/shift-tabbing focus out of the trigger+menu group must also close the menu —
   // otherwise the panel (and its stale aria-expanded="true") stays on screen after focus
@@ -30,11 +34,11 @@ function PlaybackSpeed() {
   useEffect(() => {
     if (!open) return
     const onFocusIn = (e) => {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
+      if (isOutside(e.target)) setOpen(false)
     }
     document.addEventListener('focusin', onFocusIn)
     return () => document.removeEventListener('focusin', onFocusIn)
-  }, [open])
+  }, [open, isOutside])
 
   // Roving focus: move DOM focus onto whichever option is active whenever the
   // menu opens or the active option changes via arrow/Home/End keys.
@@ -74,33 +78,24 @@ function PlaybackSpeed() {
   }
 
   const onMenuKeyDown = (e) => {
+    if (!MENU_HANDLED_KEYS.has(e.key)) return
+    e.preventDefault()
+    e.stopPropagation()
     switch (e.key) {
       case 'Escape':
-        e.preventDefault()
-        e.stopPropagation()
         closeAndReturnFocus()
         break
       case 'ArrowDown':
-        e.preventDefault()
-        e.stopPropagation()
         setActiveIndex((i) => (i + 1) % SPEEDS.length)
         break
       case 'ArrowUp':
-        e.preventDefault()
-        e.stopPropagation()
         setActiveIndex((i) => (i - 1 + SPEEDS.length) % SPEEDS.length)
         break
       case 'Home':
-        e.preventDefault()
-        e.stopPropagation()
         setActiveIndex(0)
         break
       case 'End':
-        e.preventDefault()
-        e.stopPropagation()
         setActiveIndex(SPEEDS.length - 1)
-        break
-      default:
         break
     }
   }
