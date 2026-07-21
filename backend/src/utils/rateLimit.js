@@ -8,7 +8,12 @@ function rateLimit({ windowMs = 60_000, max = 30, message = 'Too many requests' 
 
   return (req, res, next) => {
     const now = Date.now();
-    const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+    // Prefer CF-Connecting-IP: Cloudflare sets/overwrites this at its edge, so
+    // it can't be spoofed by a client going through Cloudflare, and it's right
+    // regardless of whether `trust proxy` matches the actual hop count. Falls
+    // back to req.ip (correct once `trust proxy` is set — see server.js) for
+    // local dev and any deploy not sitting behind Cloudflare.
+    const ip = req.headers['cf-connecting-ip'] || req.ip || req.socket?.remoteAddress || 'unknown';
 
     const recent = (hits.get(ip) || []).filter((t) => now - t < windowMs);
 

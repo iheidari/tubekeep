@@ -33,6 +33,17 @@ const { rateLimit } = require('./utils/rateLimit');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Production sits behind exactly one proxy hop: Cloudflare, terminating
+// straight into this container (docker-compose maps the port directly, no
+// nginx/Caddy in front — see CLAUDE.md's Deployment section). `trust proxy: 1`
+// tells Express to read the client's real address from the outermost
+// X-Forwarded-For entry set by that one hop, so `req.ip` reflects the actual
+// visitor instead of Cloudflare's own edge IP for every request (which
+// collapsed every client into one rate-limit bucket — 0XC-128). A blanket
+// `true` would be wrong here: it trusts every hop in an X-Forwarded-For chain,
+// letting a client forge extra entries to mint unlimited buckets.
+app.set('trust proxy', 1);
+
 // Fail fast on missing required secrets rather than degrading silently (a missing
 // JWT_SECRET otherwise makes every session 401 while /verify 500s). Hard error in
 // production; a warning in dev/test so the spawn-based tests still boot.
