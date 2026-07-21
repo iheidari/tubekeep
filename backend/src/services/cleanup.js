@@ -1,4 +1,9 @@
-const { cleanupOldDownloads, listDownloadDirs, isValidDownloadId } = require('../utils/storage');
+const {
+  cleanupOldDownloads,
+  listDownloadDirs,
+  isValidDownloadId,
+  hasMedia,
+} = require('../utils/storage');
 const { sweepJobs, runningDownloadIds } = require('./downloadManager');
 
 const CLEANUP_INTERVAL_HOURS = 1;
@@ -90,7 +95,7 @@ async function runCleanup(store = null) {
       // the same set a fresh scan would report.
       const expiredNow = new Set(result.expiredIds);
       const present = downloads
-        .filter((d) => d.files.length > 0 && !expiredNow.has(d.downloadId))
+        .filter((d) => hasMedia(d) && !expiredNow.has(d.downloadId))
         .map((d) => d.downloadId)
         // The ids become a ::uuid[] parameter, so one non-UUID directory name
         // would abort the whole reconcile with a cast error.

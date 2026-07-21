@@ -31,14 +31,6 @@ class DownloadCapError extends Error {
   }
 }
 
-function runningCount() {
-  let n = 0;
-  for (const job of jobs.values()) {
-    if (job.status === 'running') n++;
-  }
-  return n;
-}
-
 // Ids of jobs currently running in THIS process. The cleanup sweep uses this to
 // never age out a directory a live job is still writing to — precise where the
 // old metadata-presence check was only a heuristic. In-memory only, so it can't
@@ -50,6 +42,10 @@ function runningDownloadIds() {
     if (job.status === 'running') ids.push(id);
   }
   return ids;
+}
+
+function runningCount() {
+  return runningDownloadIds().length;
 }
 
 // Attach an observer to a job. Synchronously replays the job's current state

@@ -40,6 +40,15 @@ function getDownloadDir(downloadId) {
   return { downloadId, files, mtimeMs };
 }
 
+// True when a `getDownloadDir`/`listDownloadDirs` entry still has media to
+// serve or move. An empty directory (drained by a prior expire/move, or never
+// written to) has nothing left to reclaim or upload — the one "does this
+// download still have files" check, shared by the age-based sweep and the
+// move-to-cloud job instead of each re-deriving it from `.files.length`.
+function hasMedia(dir) {
+  return !!dir && dir.files.length > 0;
+}
+
 // Every download directory on disk — the raw material the cleanup sweep walks.
 // Ordering doesn't matter here (unlike the old metadata-backed listing, nothing
 // renders this directly); callers derive whatever order they need.
@@ -198,7 +207,7 @@ function cleanupOldDownloads(maxAgeHours = 24, { downloads = listDownloadDirs(),
   const errors = [];
 
   for (const dir of downloads) {
-    if (dir.files.length === 0 || skip.has(dir.downloadId)) continue;
+    if (!hasMedia(dir) || skip.has(dir.downloadId)) continue;
 
     try {
       if (now - dir.mtimeMs > maxAgeMs) {
@@ -227,6 +236,7 @@ module.exports = {
   isValidDownloadId,
   getDownloadDir,
   listDownloadDirs,
+  hasMedia,
   getDownloadFilePath,
   ensureDownloadDir,
   deleteDownload,

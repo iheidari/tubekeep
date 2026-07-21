@@ -1,6 +1,6 @@
 const { EventEmitter } = require('node:events');
 const { v4: uuidv4 } = require('uuid');
-const { getDownloadDir, getDownloadFilePath, markMoved } = require('../../utils/storage');
+const { getDownloadDir, getDownloadFilePath, markMoved, hasMedia } = require('../../utils/storage');
 const { getProvider } = require('./index');
 const fs = require('node:fs');
 
@@ -64,7 +64,7 @@ async function run(job) {
   }
 
   const record = getDownloadDir(job.downloadId);
-  if (!record || record.files.length === 0) {
+  if (!hasMedia(record)) {
     fail(job, 'notfound', 'This file is no longer available to move');
     return;
   }
