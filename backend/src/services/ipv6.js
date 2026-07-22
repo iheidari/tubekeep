@@ -98,7 +98,4 @@ module.exports = {
   probeIpv6Reachability,
   readExplicitForceIpv4,
   decideForceIpv4,
-  PROBE_HOST,
-  PROBE_PORT,
-  PROBE_TIMEOUT_MS,
 };
