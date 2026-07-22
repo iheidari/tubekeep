@@ -142,11 +142,24 @@ function MoveToCloud({ download, downloadHref, onMoved }) {
     // The clicked/keyboard-activated menuitem is about to unmount (the menu
     // closes); return focus to the trigger synchronously so it never falls
     // back to <body> — same contract as the Escape path and PlaybackSpeed's
-    // own selection handler. This runs before move() touches `busy`/`phase`,
-    // so the trigger is still enabled at the moment focus() is called.
+    // own selection handler.
     closeAndReturnFocus()
     move(name)
   }
+
+  // aria-disabled, not disabled: a `disabled` button is dropped from the tab
+  // order the instant `busy` flips true (moments after choose() calls
+  // closeAndReturnFocus()), so the just-returned focus would fall straight
+  // back to <body> anyway. Guard the action in onButtonClick instead — same
+  // convention as FormatSelector's "Get" button.
+  const menuTriggerProps = hasMenu
+    ? {
+        onKeyDown: onTriggerKeyDown,
+        'aria-haspopup': 'menu',
+        'aria-expanded': open && !busy,
+        'aria-controls': open && !busy ? menuId : undefined,
+      }
+    : {}
 
   return (
     <div ref={rootRef} className="relative flex flex-col items-stretch gap-1 min-w-[9rem]">
@@ -154,12 +167,11 @@ function MoveToCloud({ download, downloadHref, onMoved }) {
         ref={triggerRef}
         type="button"
         onClick={onButtonClick}
-        onKeyDown={hasMenu ? onTriggerKeyDown : undefined}
-        disabled={busy}
-        aria-haspopup={hasMenu ? 'menu' : undefined}
-        aria-expanded={hasMenu ? open && !busy : undefined}
-        aria-controls={hasMenu && open && !busy ? menuId : undefined}
-        className="flex items-center justify-center gap-1 text-primary font-label-sm text-label-sm whitespace-nowrap border border-primary px-3 py-1 rounded-full hover:bg-primary/5 transition-colors active:scale-95 disabled:opacity-70 disabled:cursor-default disabled:active:scale-100"
+        aria-disabled={busy}
+        {...menuTriggerProps}
+        className={`flex items-center justify-center gap-1 text-primary font-label-sm text-label-sm whitespace-nowrap border border-primary px-3 py-1 rounded-full hover:bg-primary/5 transition-colors ${
+          busy ? 'opacity-70 cursor-default' : 'active:scale-95'
+        }`}
       >
         <span
           className={`material-symbols-outlined text-[16px] ${busy ? 'animate-spin' : ''}`}
