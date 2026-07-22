@@ -40,11 +40,11 @@ function formatBytes(bytes) {
   return `${(bytes / 1024 ** i).toFixed(1)} ${units[i]}`;
 }
 
-// One row per source URL (0XC-10). When a download completes, drop the user's
-// older rows for the same URL and remove their media, so a re-download replaces
-// the stale entry instead of sitting next to it — and the old copy stops
-// occupying the quota. Moved-to-cloud and still-downloading rows are spared by
-// the store's supersede rule.
+// One row per canonical video identity (0XC-10, refined by 0XC-117). When a
+// download completes, drop the user's older rows for the same video and remove
+// their media, so a re-download replaces the stale entry instead of sitting
+// next to it — and the old copy stops occupying the quota. Moved-to-cloud and
+// still-downloading rows are spared by the store's supersede rule.
 //
 // This lives in the job's completion hook, NOT in the browser: downloads finish
 // server-side whether or not a client is watching the SSE (0XC-25/0XC-26), and

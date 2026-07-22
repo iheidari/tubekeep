@@ -253,10 +253,10 @@ function createStore(query) {
           WHERE user_id = $1
             AND download_id <> $2
             AND ${SUPERSEDABLE_SQL}
-            AND (
-              ($3::text IS NOT NULL AND source_key IS NOT NULL AND source_key = $3)
-              OR (NOT ($3::text IS NOT NULL AND source_key IS NOT NULL) AND url = $4)
-            )
+            AND CASE WHEN $3::text IS NOT NULL AND source_key IS NOT NULL
+                     THEN source_key = $3
+                     ELSE url = $4
+                END
           RETURNING download_id`,
         [userId, downloadId, key, url],
       );
