@@ -14,6 +14,10 @@ function moveRunwayMs(download) {
   return createdAt + FILE_EXPIRY_MS - Date.now()
 }
 
+// Id linking the "expiring soon" reason to its button via aria-describedby —
+// same pairing FormatSelector uses for its own aria-disabled reason.
+const expiringSoonId = (downloadId) => `expiring-soon-${downloadId}`
+
 // "Move to cloud" control for a completed download. Renders nothing when the
 // server hasn't configured any cloud provider. A single button opens a provider
 // menu (Dropbox / Google Drive / …); with just one enabled provider it moves
@@ -71,8 +75,9 @@ function MoveToCloud({ download, downloadHref, onMoved }) {
       <div className="flex flex-col items-stretch gap-1 min-w-[9rem]">
         <button
           type="button"
-          disabled
+          aria-disabled="true"
           title="This file is about to expire — download it to your device instead."
+          aria-describedby={expiringSoonId(download.downloadId)}
           className="flex items-center justify-center gap-1 text-on-surface-variant/60 font-label-sm text-label-sm whitespace-nowrap border border-outline-variant px-3 py-1 rounded-full cursor-default"
         >
           <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
@@ -80,7 +85,10 @@ function MoveToCloud({ download, downloadHref, onMoved }) {
           </span>
           Move to cloud
         </button>
-        <span className="font-label-sm text-label-sm text-on-surface-variant/70 text-center">
+        <span
+          id={expiringSoonId(download.downloadId)}
+          className="font-label-sm text-label-sm text-on-surface-variant/70 text-center"
+        >
           Expiring soon
         </span>
       </div>
