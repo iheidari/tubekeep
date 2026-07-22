@@ -4,7 +4,7 @@ const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { runYtDlp } = require('../src/services/ytdlp');
+const { runYtDlp, setForceIpv4 } = require('../src/services/ytdlp');
 
 const tmpDirs = [];
 after(() => {
@@ -49,4 +49,25 @@ test('runYtDlp rejects when the subprocess exits non-zero', async () => {
     () => runYtDlp(['--bad'], { binary: bin, timeout: 5000 }),
     /exited with code 1/i,
   );
+});
+
+// Regression for 0XC-126: setForceIpv4 is the seam server.js's boot-time IPv6
+// probe uses to flip this on/off after the fact — confirm it actually reaches
+// the spawned args, in both directions.
+test('setForceIpv4(true) prepends --force-ipv4 to every yt-dlp invocation', async () => {
+  const bin = fakeBin('echo "$@"');
+  try {
+    setForceIpv4(true);
+    const { stdout } = await runYtDlp(['--dump-json'], { binary: bin, timeout: 5000 });
+    assert.match(stdout, /--force-ipv4/);
+  } finally {
+    setForceIpv4(false);
+  }
+});
+
+test('setForceIpv4(false) omits --force-ipv4', async () => {
+  const bin = fakeBin('echo "$@"');
+  setForceIpv4(false);
+  const { stdout } = await runYtDlp(['--dump-json'], { binary: bin, timeout: 5000 });
+  assert.doesNotMatch(stdout, /--force-ipv4/);
 });

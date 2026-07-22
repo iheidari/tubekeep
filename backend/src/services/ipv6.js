@@ -1,0 +1,91 @@
+const net = require('node:net');
+
+// A public, reliably-listening IPv6 host: Google Public DNS also answers
+// DNS-over-TCP, so a plain TCP connect on port 53 works from any network with
+// real IPv6 connectivity — no DNS resolution of our own needed first (which
+// would add another network round-trip and its own failure modes).
+const PROBE_HOST = '2001:4860:4860::8888';
+const PROBE_PORT = 53;
+const PROBE_TIMEOUT_MS = 2000;
+
+// Attempt one IPv6 TCP connect and classify what happened. `connect` is
+// injectable so tests never touch a real socket.
+//   'reachable'  — connected before the timeout: real, working IPv6.
+//   'no-route'   — the OS rejected the attempt immediately (no IPv6 default
+//                  route at all — an ordinary IPv4-only machine; yt-dlp never
+//                  even attempts an AAAA lookup here).
+//   'blackholed' — neither connected nor errored before the timeout: a route
+//                  exists but the packets vanish — the exact failure mode
+//                  this module exists to detect (0XC-126).
+function probeIpv6Reachability({
+  host = PROBE_HOST,
+  port = PROBE_PORT,
+  timeoutMs = PROBE_TIMEOUT_MS,
+  connect = (opts) => net.connect(opts),
+} = {}) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const socket = connect({ host, port, family: 6 });
+
+    const finish = (outcome) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.removeAllListeners?.();
+      socket.destroy?.();
+      resolve(outcome);
+    };
+
+    const timer = setTimeout(() => finish('blackholed'), timeoutMs);
+
+    socket.once('connect', () => finish('reachable'));
+    socket.once('error', () => finish('no-route'));
+  });
+}
+
+// Explicit YTDLP_FORCE_IPV4 always wins over the probe, in both directions:
+// unset defers to the probe; any set value is authoritative ('true' → force
+// on, anything else → force off), matching the flag's pre-existing semantics.
+function readExplicitForceIpv4(env = process.env) {
+  const raw = env.YTDLP_FORCE_IPV4;
+  if (raw === undefined) return undefined;
+  return raw === 'true';
+}
+
+// Resolve, once, whether yt-dlp calls should force IPv4 for this process.
+// `skipProbe` lets the hermetic test suite (which must reach no real network)
+// short-circuit to the safe default of `false` when there's no explicit
+// override, instead of waiting out a real probe.
+async function decideForceIpv4({
+  env = process.env,
+  probe = probeIpv6Reachability,
+  skipProbe = false,
+} = {}) {
+  const explicit = readExplicitForceIpv4(env);
+  if (explicit !== undefined) {
+    if (explicit) {
+      console.log('🔧 yt-dlp: forcing IPv4 (YTDLP_FORCE_IPV4=true)');
+    }
+    return explicit;
+  }
+
+  if (skipProbe) return false;
+
+  const outcome = await probe();
+  if (outcome === 'blackholed') {
+    console.warn(
+      '⚠️  yt-dlp: IPv6 route present but unreachable (boot probe timed out) — forcing IPv4 for this process. Set YTDLP_FORCE_IPV4=false to override.',
+    );
+    return true;
+  }
+  return false;
+}
+
+module.exports = {
+  probeIpv6Reachability,
+  readExplicitForceIpv4,
+  decideForceIpv4,
+  PROBE_HOST,
+  PROBE_PORT,
+  PROBE_TIMEOUT_MS,
+};
