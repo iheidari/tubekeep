@@ -180,14 +180,14 @@ function MoveToCloud({ download, downloadHref, onMoved }) {
       {menuOpen && !busy && (
         <div
           ref={menuRef}
-          className="absolute top-full left-0 right-0 mt-1 z-10 bg-surface-container-high border border-outline-variant rounded-lg shadow-lg overflow-hidden"
+          className="absolute top-full left-0 right-0 mt-1 z-10 bg-surface-container-high border border-outline-variant rounded-lg shadow-lg overflow-hidden p-1"
         >
           {providers.map((p) => (
             <button
               key={p.name}
               type="button"
               onClick={() => choose(p.name)}
-              className="flex items-center gap-2 w-full px-3 py-2 text-on-surface font-label-sm text-label-sm hover:bg-primary/10 transition-colors text-left"
+              className="flex items-center gap-2 w-full px-3 py-2 rounded-md text-on-surface font-label-sm text-label-sm hover:bg-primary/10 transition-colors text-left"
             >
               <span
                 className="material-symbols-outlined text-[18px] text-primary"

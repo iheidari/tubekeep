@@ -1,16 +1,16 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 
 const SOURCES = ['YouTube', 'Vimeo', 'TikTok', '+1,000 sites']
-
-// Id linking the "no URL entered" reason to the submit button via
-// aria-describedby, same pairing FormatSelector uses for its own reason.
-const NO_URL_ID = 'url-required-hint'
 
 function UrlInput({ onSubmit, loading }) {
   const [url, setUrl] = useState('')
   const empty = !url.trim()
   const inactive = loading || empty
   const showEmptyHint = empty && !loading
+  // Id linking the "no URL entered" reason to the submit button via
+  // aria-describedby, same pairing FormatSelector uses for its own reason.
+  // Per-instance (useId) so a second UrlInput on the same page can't collide.
+  const noUrlId = useId()
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -54,7 +54,7 @@ function UrlInput({ onSubmit, loading }) {
               if (inactive) e.preventDefault()
             }}
             aria-disabled={inactive}
-            aria-describedby={showEmptyHint ? NO_URL_ID : undefined}
+            aria-describedby={showEmptyHint ? noUrlId : undefined}
             className={`flex items-center gap-2 bg-fill text-on-fill font-label-md text-[15px] px-6 py-3.5 rounded-lg transition-all shrink-0 ${
               inactive ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-90 active:scale-[0.98]'
             }`}
@@ -74,7 +74,7 @@ function UrlInput({ onSubmit, loading }) {
             )}
           </button>
           {showEmptyHint ? (
-            <span id={NO_URL_ID} className="sr-only">
+            <span id={noUrlId} className="sr-only">
               Paste a video URL first
             </span>
           ) : null}
