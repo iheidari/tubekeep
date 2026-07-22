@@ -71,3 +71,34 @@ test('setForceIpv4(false) omits --force-ipv4', async () => {
   const { stdout } = await runYtDlp(['--dump-json'], { binary: bin, timeout: 5000 });
   assert.doesNotMatch(stdout, /--force-ipv4/);
 });
+
+// Regression for 0XC-126: the module comment promises that a consumer who
+// requires ytdlp.js directly and never calls setForceIpv4 (a standalone
+// script, or any other test file that never boots server.js) still gets the
+// pre-refactor behavior of reading YTDLP_FORCE_IPV4 at load time. Nothing
+// exercised that fallback — every existing test only covers the
+// server.js-driven `setForceIpv4` seam. Force a fresh module evaluation (via
+// the require cache) with the env var set, and confirm the *never-called*
+// default still reaches the spawned args.
+test('with setForceIpv4 never called, a freshly loaded module defaults forceIpv4 from YTDLP_FORCE_IPV4', async () => {
+  const modulePath = require.resolve('../src/services/ytdlp');
+  const hadEnv = Object.hasOwn(process.env, 'YTDLP_FORCE_IPV4');
+  const originalEnv = process.env.YTDLP_FORCE_IPV4;
+  process.env.YTDLP_FORCE_IPV4 = 'true';
+  delete require.cache[modulePath];
+
+  try {
+    const fresh = require('../src/services/ytdlp');
+    const bin = fakeBin('echo "$@"');
+    const { stdout } = await fresh.runYtDlp(['--dump-json'], { binary: bin, timeout: 5000 });
+    assert.match(
+      stdout,
+      /--force-ipv4/,
+      'a module that never had setForceIpv4 called on it must still honor YTDLP_FORCE_IPV4 from load time',
+    );
+  } finally {
+    if (hadEnv) process.env.YTDLP_FORCE_IPV4 = originalEnv;
+    else delete process.env.YTDLP_FORCE_IPV4;
+    delete require.cache[modulePath];
+  }
+});

@@ -71,7 +71,20 @@ async function decideForceIpv4({
 
   if (skipProbe) return false;
 
-  const outcome = await probe();
+  // This is a best-effort auto-detection, not a required boot step — a probe
+  // that throws (e.g. `connect` raising synchronously for an environment
+  // reason) must never take the whole server down with it. Fall back to the
+  // same safe default as an ambiguous outcome, and let the process boot.
+  let outcome;
+  try {
+    outcome = await probe();
+  } catch (err) {
+    console.warn(
+      `⚠️  yt-dlp: IPv6 probe failed unexpectedly (${err.message}) — leaving IPv4 unforced.`,
+    );
+    return false;
+  }
+
   if (outcome === 'blackholed') {
     console.warn(
       '⚠️  yt-dlp: IPv6 route present but unreachable (boot probe timed out) — forcing IPv4 for this process. Set YTDLP_FORCE_IPV4=false to override.',

@@ -123,3 +123,15 @@ test('decideForceIpv4 defers to the probe when unset: "blackholed" forces IPv4 a
   assert.equal(result, true);
   assert.ok(warns.some((w) => w.includes('forcing IPv4')));
 });
+
+// This is best-effort auto-detection, not a required boot step — a probe that
+// rejects (rather than resolving to one of the three known outcomes) must
+// never propagate and take the whole boot sequence down with it.
+test('decideForceIpv4 falls back to false and logs a warning when the probe itself rejects', async () => {
+  const result = await decideForceIpv4({
+    env: {},
+    probe: () => Promise.reject(new Error('boom')),
+  });
+  assert.equal(result, false);
+  assert.ok(warns.some((w) => w.includes('probe failed unexpectedly')));
+});
