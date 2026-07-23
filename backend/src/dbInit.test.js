@@ -1,7 +1,16 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const { applySchema } = require('./dbInit');
+const { parseSchemaColumns } = require('./schemaColumns');
+
+// The real, parsed schema.sql column set — not a hand-picked subset — so
+// these tests track whatever schema.sql actually defines instead of
+// maintaining a second list that can drift from it (0XC-129).
+const realSchemaSql = fs.readFileSync(path.join(__dirname, '..', 'schema.sql'), 'utf8');
+const realColumns = parseSchemaColumns(realSchemaSql);
 
 // A fake pool that never touches a real database: it records every query,
 // answers information_schema lookups from a canned column list, and no-ops
@@ -23,21 +32,35 @@ function fakePool(columnsByTable) {
   };
 }
 
-test('applySchema resolves when every required column is present', async () => {
-  const pool = fakePool({ downloads: ['download_id', 'user_id', 'completed_at', 'moved_info'] });
+test('applySchema resolves when every column schema.sql defines is present', async () => {
+  const pool = fakePool(realColumns);
   await assert.doesNotReject(() => applySchema(pool));
   // The schema DDL ran before the column assertion.
   assert.ok(pool.queries.some((q) => q.includes('CREATE TABLE IF NOT EXISTS users')));
 });
 
-test('applySchema throws a clear error when a required column is missing', async () => {
-  const pool = fakePool({ downloads: ['download_id'] });
+test('applySchema throws a clear error when a downloads column is missing', async () => {
+  const columnsByTable = {
+    ...realColumns,
+    downloads: realColumns.downloads.filter((column) => column !== 'completed_at'),
+  };
+  const pool = fakePool(columnsByTable);
   await assert.rejects(() => applySchema(pool), /downloads.*completed_at/s);
 });
 
-test('applySchema throws when the required table has no columns at all (e.g. missing table)', async () => {
-  const pool = fakePool({});
-  await assert.rejects(() => applySchema(pool), /downloads/);
+test('applySchema throws when a users column is missing (previously uncovered by the hand-maintained list)', async () => {
+  const columnsByTable = {
+    ...realColumns,
+    users: realColumns.users.filter((column) => column !== 'max_storage_bytes'),
+  };
+  const pool = fakePool(columnsByTable);
+  await assert.rejects(() => applySchema(pool), /users.*max_storage_bytes/s);
+});
+
+test('applySchema throws when a required table has no columns at all (e.g. missing table)', async () => {
+  const columnsByTable = { ...realColumns, login_tokens: [] };
+  const pool = fakePool(columnsByTable);
+  await assert.rejects(() => applySchema(pool), /login_tokens/);
 });
 
 test('applySchema propagates a schema DDL failure and never reaches the column assertion', async () => {
