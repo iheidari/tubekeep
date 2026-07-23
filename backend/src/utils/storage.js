@@ -1,7 +1,11 @@
 const path = require('node:path');
 const fs = require('node:fs');
 
-const downloadsDir = path.join(__dirname, '../../downloads');
+// Resolve once at load time so every consumer (routes, cleanup, tests) sees the
+// same absolute path. Defaults to the historical in-tree location.
+const downloadsDir = path.resolve(
+  process.env.DOWNLOADS_DIR || path.join(__dirname, '../../downloads'),
+);
 const METADATA_FILE = 'metadata.json';
 
 // downloadIds are server-minted UUIDs. Anything else in a route param is an

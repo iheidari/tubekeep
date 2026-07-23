@@ -32,13 +32,15 @@ Backend tests are plain `node:test` files colocated with the source (`*.test.js`
 
 **CI (`.github/workflows/ci.yml`)** gates every PR with three parallel jobs — `lint` (root `npm run lint`), `test` (`cd backend && npm test`), `build` (`cd frontend && npm run build`) — so a failing backend test or a broken frontend build blocks the PR the same way a lint error does. The suite is hermetic: it needs no `yt-dlp`, `ffmpeg`, database, or network access (`backend/test/ytdlp.test.js` fakes the `yt-dlp` binary rather than spawning the real one). `.github/workflows/deploy.yml` runs the same three checks — its `lint`/`test`/`build-frontend` jobs, not to be confused with its separate, pre-existing `build` job that builds the Docker image — before that image build, since `deploy.yml` also fires on the daily scheduled rebuild and on manual `workflow_dispatch`, neither of which goes through a PR.
 
-**`backend/nodemon.json` is load-bearing — don't delete it.** Nodemon's default watch is the *entire cwd* for `.js`/`.json` changes, and `backend/downloads/` sits inside that cwd. Since every completed job writes `downloads/<downloadId>/metadata.json`, the default config made **finishing a download restart the dev server** — killing the SSE stream, wiping the in-memory job registry, and dropping every in-flight request. The browser reports that dropped connection as a *CORS* error ("CORS request did not succeed. Status code: (null)"), which points nowhere near the real cause. `nodemon.json` pins the watch to `src` so downloaded media can never trigger a reload. This affects dev only — production runs `npm start` with no watcher.
+**`backend/nodemon.json` is load-bearing — don't delete it.** Nodemon's default watch is the *entire cwd* for `.js`/`.json` changes, and the downloads directory used to sit inside that cwd (`backend/downloads/`). Since every completed job writes `<downloadId>/metadata.json`, the default config made **finishing a download restart the dev server** — killing the SSE stream, wiping the in-memory job registry, and dropping every in-flight request. The browser reports that dropped connection as a *CORS* error ("CORS request did not succeed. Status code: (null)"), which points nowhere near the real cause. `nodemon.json` pins the watch to `src` so downloaded media can never trigger a reload, regardless of where `DOWNLOADS_DIR` points — cheap insurance kept even now that the directory defaults outside the tree. This affects dev only — production runs `npm start` with no watcher.
+
+**Downloads directory is configurable (`DOWNLOADS_DIR`), not hardcoded.** `backend/src/utils/storage.js` resolves it once at load time — `process.env.DOWNLOADS_DIR` if set, else the historical `backend/downloads` — to an absolute path, and every consumer (routes, the cleanup sweep, tests) imports that single `downloadsDir` rather than joining a path itself. `server.js` logs the resolved path once at startup (`📁 Downloads directory: …`). This exists because runtime media living inside the linted, watched, packaged source tree kept causing trouble beyond the nodemon restart above — linters/formatters/editor indexing all had to be told to skip a directory that can hold many gigabytes of video, and the Docker image's bind mount only worked by convention. `docker-compose.yml` and the `Dockerfile` both set `DOWNLOADS_DIR=/data/downloads` explicitly (outside `/app/backend`) rather than relying on the default.
 
 **Single-server mode:** if `frontend/dist/` exists, `backend` serves it statically with an SPA fallback (see `server.js`). So `cd frontend && npm run build` then `cd backend && npm start` serves the whole app on port 3001 with no separate frontend process. This is how production runs.
 
 ## Architecture
 
-**Tubekeep** — a yt-dlp-backed video/audio downloader. React SPA (Vite, port 5173 in dev) + Express API (port 3001) + the `yt-dlp` CLI. Downloads land in `backend/downloads/<downloadId>/` and are *expired* (not hard-deleted) after `MAX_FILE_AGE_HOURS` (**1h**, `services/cleanup.js`).
+**Tubekeep** — a yt-dlp-backed video/audio downloader. React SPA (Vite, port 5173 in dev) + Express API (port 3001) + the `yt-dlp` CLI. Downloads land in `<DOWNLOADS_DIR>/<downloadId>/` (`DOWNLOADS_DIR`, default `backend/downloads/`) and are *expired* (not hard-deleted) after `MAX_FILE_AGE_HOURS` (**1h**, `services/cleanup.js`).
 
 ### Download flow
 1. `GET /api/info?url=...` → `services/ytdlp.js` runs `yt-dlp --dump-json`, returns formats grouped into `{ video, audio, combined }`.
@@ -135,6 +137,8 @@ Log errors with emoji prefixes for grep-ability (e.g. `❌ Fetch error:`, `⚠�
 PORT=3001
 FRONTEND_URL=http://localhost:5173   # CORS origin (pinned; credentials enabled). Unset = same-origin only
 NODE_ENV=development
+DOWNLOADS_DIR=../.data/downloads      # where media + metadata.json land; absolute-path resolved at startup and
+                                      # logged once. Unset defaults to backend/downloads (inside the source tree)
 MAX_CONCURRENT_DOWNLOADS=3            # max simultaneous downloads; unset/invalid → 3 (429 over the cap)
 YTDLP_FORCE_IPV4=true                 # pass --force-ipv4 to every yt-dlp call. Set this on a network that
                                       # advertises an IPv6 default route but black-holes IPv6 traffic —
@@ -161,7 +165,7 @@ CI/CD lives in `.github/workflows/deploy.yml`. On push to `main` (or manual disp
 1. Build a multi-stage Docker image (`Dockerfile`: frontend `npm run build` → Node 22 runtime with `ffmpeg` + `yt-dlp` installed via pip) and push to `ghcr.io/<repo>:latest`.
 2. SSH to a Proxmox Docker host **through a Cloudflare Access tunnel** (`cloudflared access ssh`, using CF service-token secrets), then `cd /opt/tubekeep && docker compose pull && docker compose up -d`.
 
-`docker-compose.yml` runs that GHCR image, maps `3001:3001`, and bind-mounts `./downloads`. The legacy `deploy/ecosystem.config.js` (PM2) is **not** the active path — Docker is. There is no Caddyfile in this repo; TLS/routing is handled externally (Cloudflare).
+`docker-compose.yml` runs that GHCR image, maps `3001:3001`, sets `DOWNLOADS_DIR=/data/downloads`, and bind-mounts `./downloads:/data/downloads`. The legacy `deploy/ecosystem.config.js` (PM2) is **not** the active path — Docker is. There is no Caddyfile in this repo; TLS/routing is handled externally (Cloudflare).
 
 ## Prerequisites
 - Node.js 18+ (Docker image uses Node 22)

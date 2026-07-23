@@ -10,7 +10,8 @@ RUN npm run build
 FROM node:22-bookworm-slim AS runtime
 ENV NODE_ENV=production \
     PORT=3001 \
-    PATH=/usr/local/bin:/usr/bin:/bin
+    PATH=/usr/local/bin:/usr/bin:/bin \
+    DOWNLOADS_DIR=/data/downloads
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
@@ -29,7 +30,7 @@ RUN cd backend && npm ci --omit=dev && npm cache clean --force
 COPY backend/ ./backend/
 COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 
-RUN mkdir -p /app/backend/downloads
+RUN mkdir -p /data/downloads
 
 # yt-dlp needs frequent updates — YouTube breaks extraction every few weeks.
 # Installed LAST so the daily cache-bust below only invalidates this layer, not
