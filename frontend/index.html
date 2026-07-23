@@ -161,6 +161,7 @@
         --pop: 226 58 36;
         --ok: 30 122 70;
         --ok-bg: 234 243 236;
+        --focus-ring: 26 20 17;
       }
       .dark {
         --bg: 14 12 10;
@@ -177,6 +178,7 @@
         --pop: 226 58 36;
         --ok: 95 208 139;
         --ok-bg: 23 37 28;
+        --focus-ring: 243 239 233;
       }
       body {
         font-family: 'Space Grotesk', sans-serif;
@@ -195,6 +197,17 @@
       ::-webkit-scrollbar-track { background: transparent; }
       ::-webkit-scrollbar-thumb { background: rgb(var(--line2)); border-radius: 4px; }
       ::-webkit-scrollbar-thumb:hover { background: rgb(var(--faint)); }
+      /* WCAG 2.4.11 Focus Appearance: one global ring for every interactive
+         element, keyed off the offset gap (not an inset ring) so it reads
+         against both a plain surface and a filled (bg-fill) control. */
+      button:focus-visible,
+      a:focus-visible,
+      input:focus-visible,
+      select:focus-visible,
+      [tabindex]:focus-visible {
+        outline: 2px solid rgb(var(--focus-ring));
+        outline-offset: 2px;
+      }
     </style>
   </head>
   <body>

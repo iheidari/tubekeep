@@ -1,9 +1,16 @@
-import { useState } from 'react'
+import { useId, useState } from 'react'
 
 const SOURCES = ['YouTube', 'Vimeo', 'TikTok', '+1,000 sites']
 
 function UrlInput({ onSubmit, loading }) {
   const [url, setUrl] = useState('')
+  const empty = !url.trim()
+  const inactive = loading || empty
+  const showEmptyHint = empty && !loading
+  // Id linking the "no URL entered" reason to the submit button via
+  // aria-describedby, same pairing FormatSelector uses for its own reason.
+  // Per-instance (useId) so a second UrlInput on the same page can't collide.
+  const noUrlId = useId()
 
   const handleSubmit = (e) => {
     e.preventDefault()
@@ -39,8 +46,18 @@ function UrlInput({ onSubmit, loading }) {
           />
           <button
             type="submit"
-            disabled={loading || !url.trim()}
-            className="flex items-center gap-2 bg-fill text-on-fill font-label-md text-[15px] px-6 py-3.5 rounded-lg hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 shrink-0"
+            onClick={(e) => {
+              // aria-disabled, not disabled: a `disabled` button drops out of
+              // the tab order, so its aria-describedby reason (and the
+              // Enter-key path below) would never reach a keyboard/screen
+              // reader user. Guard the click here instead.
+              if (inactive) e.preventDefault()
+            }}
+            aria-disabled={inactive}
+            aria-describedby={showEmptyHint ? noUrlId : undefined}
+            className={`flex items-center gap-2 bg-fill text-on-fill font-label-md text-[15px] px-6 py-3.5 rounded-lg transition-all shrink-0 ${
+              inactive ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-90 active:scale-[0.98]'
+            }`}
           >
             {loading ? (
               <>
@@ -56,6 +73,11 @@ function UrlInput({ onSubmit, loading }) {
               </>
             )}
           </button>
+          {showEmptyHint ? (
+            <span id={noUrlId} className="sr-only">
+              Paste a video URL first
+            </span>
+          ) : null}
         </div>
       </form>
 
