@@ -205,14 +205,19 @@ Content-Type: application/json
   "title": "Video Title",
   "thumbnail": "https://...",
   "keep": false,
-  "filesize": 12345678
+  "filesize": 12345678,
+  "captions": { "manual": ["en"], "auto": ["en", "es"] }
 }
 ```
 Mints a `downloadId` **and starts the download server-side** — it runs to
 completion regardless of any client connection. The optional `filesize` (the
 selected format's bytes) is checked against two independent limits, both
 returning **HTTP 507**: your account's storage quota (`users.max_storage_bytes`)
-and the server's free disk margin. Over the concurrency cap
+and the server's free disk margin. The optional `captions` (echoed straight
+back from `GET /api/info`'s response, split into `manual`/`auto` caption
+language lists) is sanitized server-side and, if present, written into that
+download's `metadata.json` — informational only today, no subtitle files are
+fetched and nothing in the API surfaces it yet. Over the concurrency cap
 (`MAX_CONCURRENT_DOWNLOADS`, default 3) it returns **HTTP 429**. All three run
 before any download starts. On success the download is recorded in the
 `downloads` table under your user as `status: 'downloading'`, so it survives a
