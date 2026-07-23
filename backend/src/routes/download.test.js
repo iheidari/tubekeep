@@ -141,6 +141,36 @@ test('the job’s terminal hooks write the outcome back to the row', async () =>
   assert.equal(row.size, 21 * MB);
 });
 
+// --- 0XC-14: caption availability is sanitized and forwarded to the job -----
+
+test('a well-formed captions object is forwarded to the job as-is', async () => {
+  const captions = { manual: ['en', 'fr'], auto: ['en', 'es'] };
+  await start({ filesize: 10 * MB, captions });
+
+  assert.deepEqual(started[0].params.captions, captions);
+});
+
+test('captions is omitted from the job params when the client sends none', async () => {
+  await start({ filesize: 10 * MB });
+
+  assert.equal(started[0].params.captions, undefined);
+});
+
+test('a malformed captions payload is dropped rather than trusted verbatim', async () => {
+  await start({ filesize: 10 * MB, captions: 'not-an-object' });
+
+  assert.equal(started[0].params.captions, undefined);
+});
+
+test('non-array/non-string caption fields are normalized to filtered arrays', async () => {
+  await start({
+    filesize: 10 * MB,
+    captions: { manual: ['en', 42, null], auto: 'nope' },
+  });
+
+  assert.deepEqual(started[0].params.captions, { manual: ['en'], auto: [] });
+});
+
 test('a failed start (over the concurrency cap) rolls its row back', async () => {
   startImpl = () => {
     throw new DownloadCapError(3);

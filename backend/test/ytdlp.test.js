@@ -4,7 +4,7 @@ const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { runYtDlp } = require('../src/services/ytdlp');
+const { runYtDlp, buildCaptions } = require('../src/services/ytdlp');
 
 const tmpDirs = [];
 after(() => {
@@ -49,4 +49,25 @@ test('runYtDlp rejects when the subprocess exits non-zero', async () => {
     () => runYtDlp(['--bad'], { binary: bin, timeout: 5000 }),
     /exited with code 1/i,
   );
+});
+
+// 0XC-14: caption availability (split manual vs auto-generated) is derived from
+// the raw --dump-json payload's `subtitles` / `automatic_captions` maps.
+test('buildCaptions splits manual and auto-generated caption languages', () => {
+  const captions = buildCaptions({
+    subtitles: { en: [{ url: 'x', ext: 'vtt' }], fr: [{ url: 'y', ext: 'vtt' }] },
+    automatic_captions: { en: [{ url: 'z', ext: 'vtt' }], es: [{ url: 'w', ext: 'vtt' }] },
+  });
+  assert.deepEqual(captions.manual.sort(), ['en', 'fr']);
+  assert.deepEqual(captions.auto.sort(), ['en', 'es']);
+});
+
+test('buildCaptions records explicit empty arrays when the source has no captions at all', () => {
+  const captions = buildCaptions({});
+  assert.deepEqual(captions, { manual: [], auto: [] });
+});
+
+test('buildCaptions handles manual-only and auto-only sources independently', () => {
+  assert.deepEqual(buildCaptions({ subtitles: { en: [] } }), { manual: ['en'], auto: [] });
+  assert.deepEqual(buildCaptions({ automatic_captions: { en: [] } }), { manual: [], auto: ['en'] });
 });

@@ -84,6 +84,7 @@ function InfoPage() {
           thumbnail: info.thumbnail,
           keep,
           filesize,
+          captions: info.captions,
         }),
       })
       const data = await response.json()

@@ -13,6 +13,20 @@ const {
 const { initSSE } = require('../utils/sse');
 const { startJob, subscribe, cancelJob, DownloadCapError } = require('../services/downloadManager');
 
+// Client-supplied caption language lists (the same `captions` the client
+// already got back from `/api/info` before picking a format — see 0XC-14).
+// Sanitized to a plain `{ manual: string[], auto: string[] }` shape before
+// being trusted into metadata.json, since a malformed shape here isn't a
+// security concern (it never reaches a command), just noise the future
+// script feature this is groundwork for would have to guard against anyway.
+// Absent/malformed input returns undefined so the caller can tell "no
+// captions data supplied" (unknown) apart from "supplied, empty" (none).
+function sanitizeCaptions(captions) {
+  if (!captions || typeof captions !== 'object') return undefined;
+  const toLangs = (v) => (Array.isArray(v) ? v.filter((lang) => typeof lang === 'string') : []);
+  return { manual: toLangs(captions.manual), auto: toLangs(captions.auto) };
+}
+
 // Human-readable bytes for the out-of-space error messages. Backend has no
 // shared formatter, and this is the only place that needs one.
 function formatBytes(bytes) {
@@ -65,7 +79,7 @@ function createDownloadRouter({ store, start = startJob }) {
   // body; the concurrency cap, the global disk backstop and the per-user storage
   // quota are all enforced here, before any job (or SSE) is created.
   router.post('/', async (req, res) => {
-    const { url, formatId, type, title, thumbnail, keep, filesize } = req.body;
+    const { url, formatId, type, title, thumbnail, keep, filesize, captions } = req.body;
     const userId = req.user.user_id;
 
     if (!url || !formatId) {
@@ -183,6 +197,7 @@ function createDownloadRouter({ store, start = startJob }) {
           title,
           thumbnail,
           keep: kept,
+          captions: sanitizeCaptions(captions),
         },
         {
           // Terminal outcomes land on the user's row. `result.size` is the real

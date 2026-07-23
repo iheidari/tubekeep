@@ -88,7 +88,7 @@ async function runHook(hook, arg, downloadId) {
 // terminal outcome through its emitter. Never throws — the terminal state is
 // captured on the job record so observers (current and future) can read it.
 async function runJob(job) {
-  const { downloadId, url, formatId, type, title, thumbnail, keep } = job.params;
+  const { downloadId, url, formatId, type, title, thumbnail, keep, captions } = job.params;
   const { signal } = job.abortController;
 
   const onProgress = (p) => {
@@ -122,6 +122,12 @@ async function runJob(job) {
       createdAt: new Date().toISOString(),
       downloadId,
     };
+    // Caption availability, split by manual/auto (0XC-14). Omitted entirely
+    // (rather than defaulted to empty arrays) when the route didn't supply it,
+    // so "no captions" stays distinguishable from "unknown" in metadata.json.
+    if (captions) {
+      metadata.captions = captions;
+    }
     saveDownloadMetadata(downloadId, metadata);
 
     job.status = 'complete';

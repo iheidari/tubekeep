@@ -125,6 +125,17 @@ async function fetchYouTubeInfo(url) {
   return JSON.parse(stdout);
 }
 
+// Pure: derive available caption languages from the raw --dump-json payload,
+// split by kind — yt-dlp exposes human-authored captions under `subtitles`
+// and auto-generated ones under a separate `automatic_captions` map. Exported
+// so this can be unit-tested without spawning yt-dlp (see 0XC-14).
+function buildCaptions(info) {
+  return {
+    manual: Object.keys(info.subtitles || {}),
+    auto: Object.keys(info.automatic_captions || {}),
+  };
+}
+
 async function getVideoInfo(url) {
   try {
     // YouTube's android_vr client is the only one currently bypassing the broken
@@ -211,6 +222,7 @@ async function getVideoInfo(url) {
         combined: combinedFormats,
       },
       subtitles,
+      captions: buildCaptions(info),
       chapters: info.chapters || [],
     };
   } catch (error) {
@@ -412,4 +424,5 @@ module.exports = {
   downloadAudio,
   isSupportedUrl,
   runYtDlp,
+  buildCaptions,
 };
