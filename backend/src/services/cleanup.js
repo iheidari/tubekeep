@@ -103,6 +103,29 @@ async function runCleanup(store = null) {
   // is synchronous and stats every download dir, so a second walk would block the
   // event loop twice per sweep for the same answer.
   const downloads = listDownloads();
+
+  // Reconcile hook-stranded downloads to `complete` *before* the age-based sweep
+  // below can delete their media. A directory's finished media can already be
+  // older than MAX_FILE_AGE_HOURS by the time a sweep first sees it (the
+  // completion hook's DB write was lost, and no earlier sweep caught it) — if
+  // cleanupOldDownloads ran first, it would delete that media on this exact
+  // sweep, and reconcileStrandedDownloads would then find nothing left to read,
+  // leaving the row stuck `downloading` until failStale wrongly retires it as
+  // `failed` (0XC-151). Doing this first guarantees the media is still on disk
+  // when the reconcile looks for it.
+  if (store) {
+    try {
+      const strandedComplete = await reconcileStrandedDownloads(store, downloads);
+      if (strandedComplete > 0) {
+        console.log(
+          `🧹 Reconciled ${strandedComplete} stranded download(s) that had already finished`,
+        );
+      }
+    } catch (err) {
+      console.error('⚠️ Cleanup could not reconcile stranded downloads:', err.message);
+    }
+  }
+
   const result = cleanupOldDownloads(MAX_FILE_AGE_HOURS, downloads);
 
   if (result.expired > 0) {
@@ -117,13 +140,6 @@ async function runCleanup(store = null) {
   // standalone CLI without a database, where this is a no-op.
   if (store) {
     try {
-      const strandedComplete = await reconcileStrandedDownloads(store, downloads);
-      if (strandedComplete > 0) {
-        console.log(
-          `🧹 Reconciled ${strandedComplete} stranded download(s) that had already finished`,
-        );
-      }
-
       // Reconcile against what is actually still on disk, so rows also expire
       // when the files went away by some other route (standalone `npm run
       // cleanup`, a manual rm) — not just when this run expired them. Derived

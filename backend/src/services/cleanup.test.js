@@ -112,3 +112,43 @@ test('a lost completion write is healed before failStale can retire it as failed
   assert.equal(row.status, 'complete');
   assert.equal(row.size, 999);
 });
+
+test('a stranded downloading row is healed to complete before the age sweep can delete its already-old media (0XC-151)', async () => {
+  // The narrowed case 0XC-151 describes: the media's own age (from
+  // metadata.json's createdAt) is already past MAX_FILE_AGE_HOURS by the time
+  // a sweep first sees it. If cleanupOldDownloads ran before the reconcile, it
+  // would delete this exact directory on this exact sweep, leaving nothing for
+  // the reconcile to read.
+  const id = crypto.randomUUID();
+  const dir = ensureDownloadDir(id);
+  created.push(dir);
+  const filename = 'video.mp4';
+  fs.writeFileSync(path.join(dir, filename), 'z'.repeat(555));
+  saveDownloadMetadata(id, {
+    url: 'https://example.com/watch?v=z',
+    title: 'A video',
+    filename,
+    size: 1, // deliberately wrong/stale — the reconcile must read the real size off disk
+    kept: false,
+    createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // past MAX_FILE_AGE_HOURS (1h)
+    downloadId: id,
+  });
+
+  const store = createMemoryStore();
+  await store.insert({
+    downloadId: id,
+    userId: USER,
+    url: 'https://example.com/watch?v=z',
+    filesize: 1,
+  });
+  // Also past failStale's 6h window — a row left `downloading` after this
+  // sweep would otherwise be wrongly retired as `failed` in the same run,
+  // which is the exact outcome this ticket says must not happen.
+  store._rows.get(id).created_at = new Date(Date.now() - 7 * 60 * 60 * 1000);
+
+  await runCleanup(store);
+
+  const row = await store.findForUser(id, USER);
+  assert.equal(row.status, 'complete');
+  assert.equal(row.size, 555);
+});
