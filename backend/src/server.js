@@ -35,6 +35,24 @@ const { setForceIpv4 } = require('./services/ytdlp');
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Production sits behind exactly one proxy hop: Cloudflare, terminating
+// straight into this container (docker-compose maps the port directly, no
+// nginx/Caddy in front — see CLAUDE.md's Deployment section). `trust proxy: 1`
+// tells Express to read the client's real address from the outermost
+// X-Forwarded-For entry set by that one hop, so `req.ip` reflects the actual
+// visitor instead of Cloudflare's own edge IP for every request (which
+// collapsed every client into one rate-limit bucket — 0XC-128). A blanket
+// `true` would be wrong here: it trusts every hop in an X-Forwarded-For chain,
+// letting a client forge extra entries to mint unlimited buckets.
+//
+// This is still only the fallback path, though: X-Forwarded-For is content a
+// client controls, not something Cloudflare's edge authenticates — a request
+// that skips Cloudflare entirely can present any chain it likes. rateLimit.js
+// prefers the CF-Connecting-IP header (which Cloudflare does overwrite) for
+// exactly that reason; `req.ip`/`trust proxy` only matters as its fallback
+// for local dev and non-Cloudflare deploys.
+app.set('trust proxy', 1);
+
 // Fail fast on missing required secrets rather than degrading silently (a missing
 // JWT_SECRET otherwise makes every session 401 while /verify 500s). Hard error in
 // production; a warning in dev/test so the spawn-based tests still boot.

@@ -17,7 +17,7 @@ const schemaPath = path.join(__dirname, '..', 'schema.sql');
 // turns that class of drift into a boot-time failure instead of a silently
 // swallowed hook error months later (0XC-115).
 const REQUIRED_COLUMNS = {
-  downloads: ['download_id', 'user_id', 'completed_at', 'moved_info'],
+  downloads: ['download_id', 'user_id', 'completed_at', 'moved_info', 'source_key'],
 };
 
 async function assertRequiredColumns(pool) {

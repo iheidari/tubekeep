@@ -20,7 +20,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const PORT = 3993;
+// Must be unique across every test file that spawns a real server — node --test
+// runs FILES in parallel, so a shared port makes one server lose the bind
+// (EADDRINUSE) and its file's requests fail with ECONNREFUSED, while the /health
+// poll can also succeed against the *other* file's server and assert on the
+// wrong process. Taken so far: 3989 cors-env, 3990 api-cache, 3992 schema-boot,
+// 3993 rateLimit-proxy.
+const PORT = 3994;
 const base = `http://localhost:${PORT}`;
 let tmpDir;
 let connectSpyPath;
