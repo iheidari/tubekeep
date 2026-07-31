@@ -199,12 +199,18 @@
       ::-webkit-scrollbar-thumb:hover { background: rgb(var(--faint)); }
       /* WCAG 2.4.11 Focus Appearance: one global ring for every interactive
          element, keyed off the offset gap (not an inset ring) so it reads
-         against both a plain surface and a filled (bg-fill) control. */
-      button:focus-visible,
-      a:focus-visible,
-      input:focus-visible,
-      select:focus-visible,
-      [tabindex]:focus-visible {
+         against both a plain surface and a filled (bg-fill) control.
+         The `:root` prefix is load-bearing, not decoration: the forms plugin
+         (loaded via the Tailwind CDN query string above) emits
+         `[type="url"]:focus, [type="email"]:focus, … { outline-color: transparent }`
+         at specificity (0,2,0), which outranks a bare `input:focus-visible`
+         (0,1,1) — so every text input would focus with an invisible ring.
+         `:root` lifts this rule to (0,2,1) so it wins. */
+      :root button:focus-visible,
+      :root a:focus-visible,
+      :root input:focus-visible,
+      :root select:focus-visible,
+      :root [tabindex]:focus-visible {
         outline: 2px solid rgb(var(--focus-ring));
         outline-offset: 2px;
       }
