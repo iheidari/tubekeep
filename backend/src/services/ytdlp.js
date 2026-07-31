@@ -53,12 +53,26 @@ function isSupportedUrl(value) {
 // On a network that advertises an IPv6 default route but black-holes IPv6
 // traffic, every yt-dlp call stalls ~80s: Python's urllib has no Happy Eyeballs,
 // so it waits out the full TCP timeout on each AAAA address before falling back
-// to IPv4. Setting YTDLP_FORCE_IPV4=true skips the AAAA attempt entirely (~1.5s
-// instead of ~85s). Opt-in, not default — it would break an IPv6-only host.
-const FORCE_IPV4 = process.env.YTDLP_FORCE_IPV4 === 'true';
+// to IPv4. Forcing IPv4 skips the AAAA attempt entirely (~1.5s instead of ~85s).
+// Not on by default — it would break a genuinely IPv6-only host.
+//
+// Defaults from the raw env flag so direct use of this module (a script, or a
+// unit test that never runs server.js's boot sequence) behaves the same as
+// before. `server.js` overwrites this once at boot via `setForceIpv4`, with
+// the resolved decision from `services/ipv6.js`: an explicit YTDLP_FORCE_IPV4
+// wins outright, otherwise a timeout-bounded probe auto-detects a black-holed
+// route (0XC-126) — so most operators never have to set the flag by hand.
+//
+// `setForceIpv4` must be called at most once, at boot, before `app.listen` —
+// never from a request handler or while downloads are in flight. It's a
+// plain module-level mutable, so a call after boot would apply to every
+// subsequent `runYtDlp` invocation process-wide, including a retry of an
+// already-in-progress download (`runDownloadWithRetry`) picking up a
+// different value between attempts of the *same* logical job.
+let forceIpv4 = process.env.YTDLP_FORCE_IPV4 === 'true';
 
-if (FORCE_IPV4) {
-  console.log('🔧 yt-dlp: forcing IPv4 (YTDLP_FORCE_IPV4=true)');
+function setForceIpv4(value) {
+  forceIpv4 = Boolean(value);
 }
 
 // Flags that must be on EVERY invocation. Owned here, at the single spawn
@@ -66,7 +80,7 @@ if (FORCE_IPV4) {
 // forgot `--extractor-args` would silently regress YouTube to the broken
 // 360p/hang path. Prepended, not appended: the URL is always the last argument.
 function universalArgs() {
-  const prefix = FORCE_IPV4 ? ['--force-ipv4'] : [];
+  const prefix = forceIpv4 ? ['--force-ipv4'] : [];
   return [...prefix, '--extractor-args', YOUTUBE_EXTRACTOR_ARGS];
 }
 
@@ -418,4 +432,5 @@ module.exports = {
   downloadAudio,
   isSupportedUrl,
   runYtDlp,
+  setForceIpv4,
 };

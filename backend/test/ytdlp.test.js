@@ -4,7 +4,7 @@ const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { runYtDlp } = require('../src/services/ytdlp');
+const { runYtDlp, setForceIpv4 } = require('../src/services/ytdlp');
 
 const tmpDirs = [];
 after(() => {
@@ -49,6 +49,58 @@ test('runYtDlp rejects when the subprocess exits non-zero', async () => {
     () => runYtDlp(['--bad'], { binary: bin, timeout: 5000 }),
     /exited with code 1/i,
   );
+});
+
+// Regression for 0XC-126: setForceIpv4 is the seam server.js's boot-time IPv6
+// probe uses to flip this on/off after the fact — confirm it actually reaches
+// the spawned args, in both directions.
+test('setForceIpv4(true) prepends --force-ipv4 to every yt-dlp invocation', async () => {
+  const bin = fakeBin('echo "$@"');
+  try {
+    setForceIpv4(true);
+    const { stdout } = await runYtDlp(['--dump-json'], { binary: bin, timeout: 5000 });
+    assert.match(stdout, /--force-ipv4/);
+  } finally {
+    setForceIpv4(false);
+  }
+});
+
+test('setForceIpv4(false) omits --force-ipv4', async () => {
+  const bin = fakeBin('echo "$@"');
+  setForceIpv4(false);
+  const { stdout } = await runYtDlp(['--dump-json'], { binary: bin, timeout: 5000 });
+  assert.doesNotMatch(stdout, /--force-ipv4/);
+});
+
+// Regression for 0XC-126: the module comment promises that a consumer who
+// requires ytdlp.js directly and never calls setForceIpv4 (a standalone
+// script, or any other test file that never boots server.js) still gets the
+// pre-refactor behavior of reading YTDLP_FORCE_IPV4 at load time. Nothing
+// exercised that fallback — every existing test only covers the
+// server.js-driven `setForceIpv4` seam. Force a fresh module evaluation (via
+// the require cache) with the env var set, and confirm the *never-called*
+// default still reaches the spawned args.
+test('with setForceIpv4 never called, a freshly loaded module defaults forceIpv4 from YTDLP_FORCE_IPV4', async () => {
+  const modulePath = require.resolve('../src/services/ytdlp');
+  const hadEnv = Object.hasOwn(process.env, 'YTDLP_FORCE_IPV4');
+  const originalEnv = process.env.YTDLP_FORCE_IPV4;
+  process.env.YTDLP_FORCE_IPV4 = 'true';
+  delete require.cache[modulePath];
+
+  try {
+    const fresh = require('../src/services/ytdlp');
+    const bin = fakeBin('echo "$@"');
+    const { stdout } = await fresh.runYtDlp(['--dump-json'], { binary: bin, timeout: 5000 });
+    assert.match(
+      stdout,
+      /--force-ipv4/,
+      'a module that never had setForceIpv4 called on it must still honor YTDLP_FORCE_IPV4 from load time',
+    );
+  } finally {
+    if (hadEnv) process.env.YTDLP_FORCE_IPV4 = originalEnv;
+    else delete process.env.YTDLP_FORCE_IPV4;
+    delete require.cache[modulePath];
+  }
 });
 
 // --- getVideoInfo's sourceKey construction (0XC-117) ------------------------
