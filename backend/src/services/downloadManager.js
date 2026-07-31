@@ -96,7 +96,7 @@ async function runHook(hook, arg, downloadId) {
 // terminal outcome through its emitter. Never throws — the terminal state is
 // captured on the job record so observers (current and future) can read it.
 async function runJob(job) {
-  const { downloadId, url, formatId, type, title, thumbnail, keep } = job.params;
+  const { downloadId, url, formatId, type, title, thumbnail, keep, sourceKey } = job.params;
   const { signal } = job.abortController;
 
   const onProgress = (p) => {
@@ -122,6 +122,11 @@ async function runJob(job) {
     // SSE `complete` payload and the completion hook below.
     const metadata = {
       url,
+      // Carried through so the SSE `complete` frame (and therefore the
+      // frontend's optimistic `addDownload`) can match the server's canonical-
+      // identity supersede rule instantly, not just after the next reload
+      // (0XC-117).
+      sourceKey: sourceKey || null,
       title: title || result.filename,
       thumbnail,
       formatId,

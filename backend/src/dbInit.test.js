@@ -24,7 +24,9 @@ function fakePool(columnsByTable) {
 }
 
 test('applySchema resolves when every required column is present', async () => {
-  const pool = fakePool({ downloads: ['download_id', 'user_id', 'completed_at', 'moved_info'] });
+  const pool = fakePool({
+    downloads: ['download_id', 'user_id', 'completed_at', 'moved_info', 'source_key'],
+  });
   await assert.doesNotReject(() => applySchema(pool));
   // The schema DDL ran before the column assertion.
   assert.ok(pool.queries.some((q) => q.includes('CREATE TABLE IF NOT EXISTS users')));
@@ -33,6 +35,17 @@ test('applySchema resolves when every required column is present', async () => {
 test('applySchema throws a clear error when a required column is missing', async () => {
   const pool = fakePool({ downloads: ['download_id'] });
   await assert.rejects(() => applySchema(pool), /downloads.*completed_at/s);
+});
+
+// source_key (0XC-117) is read unconditionally in downloadsStore.js's INSERT
+// column list, so a database missing it must fail loudly at boot rather than
+// erroring on every download start — the same guarantee completed_at/moved_info
+// already have.
+test('applySchema throws when source_key is missing', async () => {
+  const pool = fakePool({
+    downloads: ['download_id', 'user_id', 'completed_at', 'moved_info'],
+  });
+  await assert.rejects(() => applySchema(pool), /downloads.*source_key/s);
 });
 
 test('applySchema throws when the required table has no columns at all (e.g. missing table)', async () => {

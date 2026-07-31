@@ -50,3 +50,80 @@ test('runYtDlp rejects when the subprocess exits non-zero', async () => {
     /exited with code 1/i,
   );
 });
+
+// --- getVideoInfo's sourceKey construction (0XC-117) ------------------------
+// getVideoInfo has no `binary` injection seam of its own — it always spawns
+// whatever `ytDlpBin` resolved to at module load (preferring `~/.local/bin/yt-dlp`
+// over the system binary). We exploit exactly that lookup: point `HOME` at a
+// throwaway directory containing a fake `~/.local/bin/yt-dlp` that prints fixed
+// --dump-json output, then re-require the module so it re-resolves `ytDlpBin`
+// against the new HOME. Node isolates each test FILE in its own process, so
+// mutating HOME here can't leak into other test files.
+const YTDLP_MODULE = require.resolve('../src/services/ytdlp');
+
+// A minimal --dump-json payload with one video-only format, so getVideoInfo's
+// "no video-only formats yet, retry" loop never triggers and the fake binary is
+// invoked exactly once.
+const BASE_INFO = {
+  title: 'Test video',
+  duration: 100,
+  thumbnail: 'https://example.com/thumb.jpg',
+  uploader: 'Someone',
+  upload_date: '20260101',
+  webpage_url: 'https://example.com/watch?v=dQw4w9WgXcQ',
+  formats: [
+    { format_id: '137', ext: 'mp4', vcodec: 'avc1', acodec: 'none', resolution: '1920x1080' },
+    { format_id: '140', ext: 'm4a', vcodec: 'none', acodec: 'mp4a.40.2' },
+  ],
+};
+
+// Write a fake `~/.local/bin/yt-dlp` under a throwaway HOME that prints fixed
+// --dump-json output, and return that throwaway HOME.
+function fakeInfoHome(infoOverrides) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ytdlp-home-'));
+  tmpDirs.push(home);
+  const binDir = path.join(home, '.local', 'bin');
+  fs.mkdirSync(binDir, { recursive: true });
+  const payload = JSON.stringify({ ...BASE_INFO, ...infoOverrides });
+  fs.writeFileSync(
+    path.join(binDir, 'yt-dlp'),
+    `#!/usr/bin/env node\nprocess.stdout.write(${JSON.stringify(payload)});\n`,
+    { mode: 0o755 },
+  );
+  return home;
+}
+
+// Re-require ytdlp.js against a given HOME, run `fn` against the fresh module,
+// then restore HOME and the module cache regardless of outcome.
+async function withFakeYtDlp(infoOverrides, fn) {
+  const originalHome = process.env.HOME;
+  process.env.HOME = fakeInfoHome(infoOverrides);
+  delete require.cache[YTDLP_MODULE];
+  try {
+    return await fn(require('../src/services/ytdlp'));
+  } finally {
+    process.env.HOME = originalHome;
+    delete require.cache[YTDLP_MODULE];
+  }
+}
+
+test('getVideoInfo builds a namespaced sourceKey from the extractor and id', async () => {
+  await withFakeYtDlp({ id: 'dQw4w9WgXcQ', extractor: 'youtube' }, async (ytdlp) => {
+    const info = await ytdlp.getVideoInfo('https://example.com/watch?v=dQw4w9WgXcQ');
+    assert.equal(info.sourceKey, 'youtube:dQw4w9WgXcQ');
+  });
+});
+
+test('getVideoInfo falls back to a null sourceKey when the extractor is missing', async () => {
+  await withFakeYtDlp({ id: 'dQw4w9WgXcQ', extractor: undefined }, async (ytdlp) => {
+    const info = await ytdlp.getVideoInfo('https://example.com/watch?v=dQw4w9WgXcQ');
+    assert.equal(info.sourceKey, null);
+  });
+});
+
+test('getVideoInfo falls back to a null sourceKey when the id is missing', async () => {
+  await withFakeYtDlp({ id: undefined, extractor: 'youtube' }, async (ytdlp) => {
+    const info = await ytdlp.getVideoInfo('https://example.com/watch?v=dQw4w9WgXcQ');
+    assert.equal(info.sourceKey, null);
+  });
+});

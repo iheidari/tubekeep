@@ -198,6 +198,12 @@ async function getVideoInfo(url) {
 
     return {
       id: info.id,
+      // Namespaced extractor id (e.g. `youtube:dQw4w9WgXcQ`) — stable across
+      // every URL form a video can be pasted as (0XC-117). Namespaced so two
+      // extractors reusing the same bare id string can't collide. Null when
+      // the extractor returned no id, so callers fall back to matching on the
+      // raw URL exactly as before.
+      sourceKey: info.extractor && info.id ? `${info.extractor}:${info.id}` : null,
       title: info.title,
       description: info.description,
       duration: info.duration,

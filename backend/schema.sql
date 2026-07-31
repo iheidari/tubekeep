@@ -62,6 +62,11 @@ CREATE TABLE IF NOT EXISTS downloads (
   moved       boolean NOT NULL DEFAULT false,
   moved_info  jsonb,
   kept        boolean NOT NULL DEFAULT false,
+  -- Namespaced extractor id (e.g. `youtube:dQw4w9WgXcQ`), used to match
+  -- re-downloads by canonical video identity instead of the raw URL string
+  -- (0XC-117). Nullable: rows from before this column existed, or from an
+  -- extractor that returned no id, fall back to matching on `url`.
+  source_key  text,
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 
@@ -69,7 +74,10 @@ CREATE TABLE IF NOT EXISTS downloads (
 -- database that already has the original definition.
 ALTER TABLE downloads ADD COLUMN IF NOT EXISTS moved_info jsonb;
 ALTER TABLE downloads ADD COLUMN IF NOT EXISTS completed_at timestamptz;
+ALTER TABLE downloads ADD COLUMN IF NOT EXISTS source_key text;
 
 -- The listing query is always "this user's rows, newest first".
 CREATE INDEX IF NOT EXISTS downloads_user_id_idx ON downloads (user_id);
 CREATE INDEX IF NOT EXISTS downloads_user_created_idx ON downloads (user_id, created_at DESC);
+-- Supports supersedeForUser's canonical-identity match (0XC-117).
+CREATE INDEX IF NOT EXISTS downloads_user_source_key_idx ON downloads (user_id, source_key);

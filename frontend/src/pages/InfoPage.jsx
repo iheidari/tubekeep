@@ -1,14 +1,116 @@
-import { useEffect, useState } from 'react'
-import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
+import { useEffect, useMemo, useState } from 'react'
+import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import BackLink from '../components/BackLink'
 import FormatSelector from '../components/FormatSelector'
 import { useHistory } from '../context/useHistory'
-import { apiFetch, fetchDisk, saveStartParams } from '../lib/media'
+import { providerLabel } from '../lib/cloud'
+import { apiFetch, fetchDisk, saveStartParams, sharesSource } from '../lib/media'
+
+// The one row a download of `info` would be duplicating, or null. Only the three
+// states where downloading again is genuinely redundant count, most actionable
+// first: a job already running for this video, a copy whose media is still on
+// our disk, and a copy the user has moved to their own cloud. Expired rows are
+// deliberately NOT a duplicate — their media is gone, so re-downloading one is
+// the intended action, not a mistake. Failed rows are excluded for the same
+// reason. Matching is `sharesSource`, so a video pasted as a different link form
+// (youtu.be/ID vs watch?v=ID) is still recognised (0XC-117).
+//
+// `filename` is the "media landed" signal rather than `status === 'complete'`
+// because this list holds two shapes: rows synced from GET /api/files carry a
+// status, while the record addDownload writes from the SSE `complete` payload
+// does not — both carry a filename.
+function findDuplicate(info, history) {
+  if (!info) return null
+  const fresh = { url: info.originalUrl, sourceKey: info.sourceKey }
+  const matches = history.filter((d) => sharesSource(fresh, d))
+  return (
+    matches.find((d) => d.status === 'downloading') ||
+    matches.find((d) => !!d.filename && !d.expired && !d.moved && d.status !== 'failed') ||
+    matches.find((d) => d.moved) ||
+    null
+  )
+}
+
+// Copy for each duplicate state. The consequence line matters more than the
+// headline: the server supersedes an older row for the same video once the new
+// download completes (0XC-10), so "you already have this" really means "this
+// will replace it" — except for a moved row, which supersede spares.
+function duplicateNotice(duplicate) {
+  if (duplicate.status === 'downloading') {
+    return {
+      icon: 'downloading',
+      headline: 'This video is already downloading.',
+      detail: 'Starting it again runs a second download of the same video.',
+      action: { to: `/download/${duplicate.downloadId}`, label: 'View progress' },
+    }
+  }
+  if (duplicate.moved) {
+    const label = providerLabel(duplicate.moved.provider)
+    return {
+      icon: 'cloud_done',
+      headline: `You already moved this video to your ${label}.`,
+      detail: `Downloading it again won't touch the copy in your ${label}.`,
+      action: duplicate.moved.link
+        ? { href: duplicate.moved.link, label: `Open in ${label}` }
+        : null,
+    }
+  }
+  return {
+    icon: 'check_circle',
+    headline: 'You already have this video.',
+    detail: 'Downloading it again replaces the copy in your downloads.',
+    action: { to: `/play/${duplicate.downloadId}`, label: 'Play it' },
+  }
+}
+
+// Non-blocking on purpose: re-downloading is legitimate (a different format or
+// quality, or simply wanting a fresh copy), so this informs rather than stops.
+// `role="status"` over `alert` for the same reason — it resolves after the info
+// fetch, and a polite announcement shouldn't interrupt what a screen reader is
+// already reading out about the formats below.
+function DuplicateBanner({ duplicate }) {
+  const { icon, headline, detail, action } = duplicateNotice(duplicate)
+
+  return (
+    <div className="max-w-4xl mx-auto mb-stack-sm">
+      <div
+        role="status"
+        className="flex items-start gap-3 bg-surface border border-line rounded-xl px-4 py-3.5"
+      >
+        <span className="material-symbols-outlined text-pop text-[20px]" aria-hidden="true">
+          {icon}
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-[13.5px] text-ink">{headline}</p>
+          <p className="text-[12.5px] text-muted mt-0.5">{detail}</p>
+        </div>
+        {action &&
+          (action.href ? (
+            <a
+              href={action.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-shrink-0 text-[12.5px] font-semibold text-pop hover:underline whitespace-nowrap"
+            >
+              {action.label}
+            </a>
+          ) : (
+            <Link
+              to={action.to}
+              className="flex-shrink-0 text-[12.5px] font-semibold text-pop hover:underline whitespace-nowrap"
+            >
+              {action.label}
+            </Link>
+          ))}
+      </div>
+    </div>
+  )
+}
 
 function InfoPage() {
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const { apiUrl, startPending } = useHistory()
+  const { apiUrl, history, startPending } = useHistory()
   const url = searchParams.get('url')
 
   const [info, setInfo] = useState(null)
@@ -62,6 +164,11 @@ function InfoPage() {
     }
   }, [url, apiUrl])
 
+  // Recomputed as the history list changes, so the banner appears the moment a
+  // concurrent download of the same video starts in another tab and clears
+  // itself if that row is cancelled while this screen is open.
+  const duplicate = useMemo(() => findDuplicate(info, history), [info, history])
+
   if (!url) return <Navigate to="/" replace />
 
   const handleDownload = async (formatId, type, keep, filesize) => {
@@ -84,6 +191,10 @@ function InfoPage() {
           thumbnail: info.thumbnail,
           keep,
           filesize,
+          // Namespaced extractor id from /api/info — lets the server match a
+          // re-download by canonical video identity instead of the raw URL
+          // string (0XC-117).
+          sourceKey: info.sourceKey,
         }),
       })
       const data = await response.json()
@@ -108,6 +219,10 @@ function InfoPage() {
       startPending({
         downloadId,
         url: info.originalUrl,
+        // Carried so this placeholder is matchable by canonical identity before
+        // the next server sync replaces it — without it the duplicate warning
+        // would miss an in-flight download pasted as a different link form.
+        sourceKey: info.sourceKey,
         type,
         title: info.title,
         thumbnail: info.thumbnail,
@@ -184,6 +299,7 @@ function InfoPage() {
           </div>
         </div>
       )}
+      {duplicate && <DuplicateBanner duplicate={duplicate} />}
       <FormatSelector
         info={info}
         onDownload={handleDownload}
