@@ -31,6 +31,7 @@ const LISTENING_RE = /Server running on http:\/\/localhost:(\d+)/;
 
 const BOOT_TIMEOUT_MS = 20_000;
 const POLL_INTERVAL_MS = 50;
+const POLL_TIMEOUT_MS = 2_000;
 
 /**
  * Make a throwaway directory to spawn a child in, holding only the `.env` it
@@ -65,20 +66,32 @@ function removeScratchCwd(dir) {
  * once it answers `/health`.
  *
  * @param {object} [options]
- * @param {string} [options.cwd] Working directory for the child. Pass a scratch
- *   dir holding its own `.env` when the test must not inherit a real
- *   `backend/.env` (server.js runs `dotenv.config()` against its cwd).
+ * @param {string} [options.cwd] Working directory for the child — a scratch dir
+ *   from `scratchCwd`, when the `.env` body itself matters. Omit it and the
+ *   helper makes its own empty-`.env` scratch dir and removes it on `cleanup()`;
+ *   the child is never spawned in the inherited cwd.
  * @param {Record<string, string|undefined>} [options.env] Overrides merged over
  *   `process.env`. A key set to `undefined` is DELETED from the child's env —
  *   how a test exercises an "unset DATABASE_URL" style path.
  * @param {string[]} [options.execArgv] Extra `node` argv placed before the
  *   entry point (e.g. `['--require', spyPath]`).
  * @returns {Promise<{server: import('node:child_process').ChildProcess, port: number,
- *   base: string, stdout: () => string, stderr: () => string, kill: (signal?: string) => void}>}
+ *   base: string, stdout: () => string, stderr: () => string,
+ *   kill: (signal?: string) => void, cleanup: (signal?: string) => void}>}
+ *   Call `cleanup()` in teardown — it kills the child and removes the scratch
+ *   dir the helper owns. `kill()` only does the former.
  * @throws If the child exits, fails to spawn, or never listens — with its
  *   captured stdout/stderr in the message, rather than an opaque timeout.
  */
 async function spawnServer({ cwd, env: envOverrides = {}, execArgv = [] } = {}) {
+  // Isolation is the default here, not opt-in. The port is mandatory but the
+  // cwd used to be optional, and a child spawned in the inherited cwd has
+  // dotenv load this machine's real backend/.env straight back over whatever
+  // `env` just deleted — the same silent "asserted against the wrong config"
+  // failure the fixed ports caused, one layer down. No drift guard can catch a
+  // caller simply omitting an argument, so the default closes it instead.
+  const ownedCwd = cwd === undefined ? scratchCwd('tk-spawn-server-') : null;
+
   // An `undefined` override deletes the variable — but PORT is exempt from
   // both halves of that: it's set last so a caller can't override it, and
   // skipped in the delete loop so a caller can't *unset* it either. Without
@@ -91,7 +104,7 @@ async function spawnServer({ cwd, env: envOverrides = {}, execArgv = [] } = {}) 
   }
 
   const server = spawn('node', [...execArgv, SERVER_ENTRY], {
-    cwd,
+    cwd: cwd ?? ownedCwd,
     env,
     // stdout must be piped — it's how the bound port gets back here. stderr is
     // piped so a boot failure can be reported with its actual cause. Both are
@@ -113,12 +126,17 @@ async function spawnServer({ cwd, env: envOverrides = {}, execArgv = [] } = {}) 
   server.on('error', (err) => {
     spawnError = err;
   });
-  server.on('exit', (code, signal) => {
+  // `close`, not `exit`: exit can fire while the stdio pipes still hold unread
+  // data, which would truncate — or empty — the very stderr this helper's
+  // loud-failure reporting exists to surface. close is the drained-guaranteed
+  // event.
+  server.on('close', (code, signal) => {
     exited = { code, signal };
   });
 
   const bootFailure = (reason) => {
     server.kill('SIGKILL');
+    removeScratchCwd(ownedCwd);
     return new Error(
       `${reason}\n--- child stderr ---\n${stderr || '(empty)'}\n--- child stdout ---\n${stdout || '(empty)'}`,
     );
@@ -144,7 +162,14 @@ async function spawnServer({ cwd, env: envOverrides = {}, execArgv = [] } = {}) 
 
     if (port !== null) {
       try {
-        const res = await fetch(`http://localhost:${port}/health`);
+        // The deadline is only checked at the top of the loop, so an
+        // unbounded fetch that wedges would hang spawnServer past
+        // BOOT_TIMEOUT_MS forever. `node --test` applies no hook timeout of
+        // its own, so that lands as a hung CI job rather than a failure —
+        // cap each probe instead.
+        const res = await fetch(`http://localhost:${port}/health`, {
+          signal: AbortSignal.timeout(POLL_TIMEOUT_MS),
+        });
         if (res.ok) {
           return {
             server,
@@ -153,6 +178,10 @@ async function spawnServer({ cwd, env: envOverrides = {}, execArgv = [] } = {}) 
             stdout: () => stdout,
             stderr: () => stderr,
             kill: (signal = 'SIGKILL') => server.kill(signal),
+            cleanup: (signal = 'SIGKILL') => {
+              server.kill(signal);
+              removeScratchCwd(ownedCwd);
+            },
           };
         }
       } catch {

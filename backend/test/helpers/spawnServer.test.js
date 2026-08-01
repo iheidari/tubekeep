@@ -45,11 +45,19 @@ test('resolves with the port the OS actually bound, and it serves /health', asyn
 test('two servers running at once get distinct ports (the collision this replaces)', async () => {
   const cwdA = scratchCwd('tk-spawn-helper-a-');
   const cwdB = scratchCwd('tk-spawn-helper-b-');
-  const [a, b] = await Promise.all([
+  // allSettled, not all: `all` rejects on the first failure and drops the
+  // other handle on the floor, leaking a live child whose piped stdio keeps
+  // the runner's event loop open — so a genuine failure here would surface as
+  // a hung suite instead of a red test.
+  const [settledA, settledB] = await Promise.allSettled([
     spawnServer({ cwd: cwdA, env: { DATABASE_URL: undefined } }),
     spawnServer({ cwd: cwdB, env: { DATABASE_URL: undefined } }),
   ]);
+  const a = settledA.value;
+  const b = settledB.value;
   try {
+    assert.ok(a && b, `both servers must boot (${settledA.reason ?? ''}${settledB.reason ?? ''})`);
+
     assert.notStrictEqual(a.port, b.port, 'concurrent servers must not share a port');
 
     // Both must be independently reachable — the pre-0XC-275 failure mode was
@@ -59,8 +67,8 @@ test('two servers running at once get distinct ports (the collision this replace
       assert.strictEqual(res.status, 200);
     }
   } finally {
-    a.server.kill('SIGKILL');
-    b.server.kill('SIGKILL');
+    a?.server.kill('SIGKILL');
+    b?.server.kill('SIGKILL');
     removeScratchCwd(cwdA);
     removeScratchCwd(cwdB);
   }
@@ -209,14 +217,25 @@ test("fails loudly with the child's stderr when the server can't boot", async ()
     // NODE_ENV=production with no JWT_SECRET makes server.js throw at require
     // time — a deterministic boot failure. Before the helper this surfaced as a
     // 5s poll timeout into a bare "did not start in time" with no cause.
+    //
+    // The handle is captured rather than discarded: if the child ever DID boot,
+    // an un-killed server's piped stdio would hold the runner's event loop open
+    // and this assertion failure would present as a hung suite.
+    let booted = null;
     await assert.rejects(
-      () => spawnServer({ cwd, env: { NODE_ENV: 'production', JWT_SECRET: undefined } }),
+      async () => {
+        booted = await spawnServer({
+          cwd,
+          env: { NODE_ENV: 'production', JWT_SECRET: undefined },
+        });
+      },
       (err) => {
         assert.match(err.message, /exited before it started listening/);
         assert.match(err.message, /JWT_SECRET is required in production/);
         return true;
       },
     );
+    booted?.cleanup();
   } finally {
     removeScratchCwd(cwd);
   }
@@ -257,9 +276,11 @@ test('src/server.js reports the bound port, not the requested one', () => {
   );
 });
 
-// Exempt from both scans below: the helper itself (it owns the port and names
-// the entry point by design) and this file (which has to spell out the very
-// shapes the scans look for, in order to test them).
+// Exempt from both scans below: the helper itself — which the corpus now does
+// reach, since it scans every `.js` in this directory, and which names both the
+// port and the entry point by design — and this file, which has to spell out
+// the very shapes the scans look for in order to test them. Any other file
+// added here needs a reason as good as those two.
 const SCAN_EXEMPT = new Set([
   path.join(__dirname, 'spawnServer.js'),
   path.join(__dirname, 'spawnServer.test.js'),
@@ -276,30 +297,55 @@ function stripComments(source) {
 
 // A spawn env entry (`PORT: '3993'`) or a per-file constant (`const PORT = 3993`),
 // either of which is a hand-picked port that can collide with another file's.
-// `[^=]` keeps a comparison (`process.env.PORT === '…'`) from matching.
+// The optional quotes and `]` cover the forms a spawn env can equally well be
+// written in — `{ 'PORT': '3993' }`, `env["PORT"] = …` — which a bare `\bPORT\b`
+// would walk straight past. `[^=]` keeps a comparison
+// (`process.env.PORT === '…'`) from matching.
 function namesAPort(source) {
-  return /\bPORT\b\s*[:=][^=]/.test(stripComments(source));
+  return /['"]?\bPORT\b['"]?\]?\s*[:=][^=]/.test(stripComments(source));
 }
 
 // Naming a port is the symptom; spawning the server yourself is the disease. A
 // file could `spawn('node', [… 'src/server.js'])` with no PORT at all and let
 // it default to 3001 — no collision with a sibling test file, but a guaranteed
 // one with a running dev server, and no ephemeral port either.
+//
+// Matched as a *module path* rather than a bare `includes('server.js')`: the
+// extension is optional, since `require('../src/server')` boots the same
+// hardcoded 3001 in-process and would otherwise slip through, and requiring the
+// `src/` segment inside quotes stops an assertion message that merely mentions
+// server.js from being a false positive.
 function spawnsTheServerItself(source) {
-  return stripComments(source).includes('server.js');
+  // `[/\\]+` rather than a single separator: a backslash path written in JS
+  // source arrives here escaped (`"src\\server.js"`), so the literal text
+  // carries two.
+  return /['"][^'"]*\bsrc[/\\]+server(\.js)?['"]/.test(stripComments(source));
 }
 
-// Every `*.test.js` under backend/ — the spawn-based suites in `test/` and the
-// colocated ones under `src/` — read once, since all three scans below share
-// the same corpus.
-const SCANNED_TEST_FILES = (function collectScannedTestFiles(root) {
+// The scan corpus: every `*.test.js` under backend/ (the spawn-based suites in
+// `test/` and the colocated ones under `src/`), plus every `.js` under
+// `test/helpers/` — a future shared boot helper is not a test file, so without
+// that second rule it could hardcode a port or spawn the entry point with
+// neither guard noticing. Read once, since all three scans share the corpus.
+const HELPERS_DIR = __dirname;
+
+function isScannable(full, name) {
+  return name.endsWith('.test.js') || path.dirname(full) === HELPERS_DIR;
+}
+
+const SCANNED_TEST_FILES = (function collectScannedFiles(root) {
   const found = [];
   const walk = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
-      else if (entry.name.endsWith('.test.js') && !SCAN_EXEMPT.has(full)) found.push(full);
+      else if (
+        entry.name.endsWith('.js') &&
+        isScannable(full, entry.name) &&
+        !SCAN_EXEMPT.has(full)
+      )
+        found.push(full);
     }
   };
   walk(root);
@@ -333,6 +379,19 @@ test('the drift scan actually reaches the spawn-based test files', () => {
     scanned.some((f) => f.startsWith(`src${path.sep}`)),
     'the drift scan never descended into src/, where colocated *.test.js files live',
   );
+
+  // And every non-exempt `.js` in test/helpers/, not just `*.test.js`: the next
+  // shared boot helper wouldn't be a test file, and is exactly the kind of place
+  // a hardcoded port would reappear unnoticed.
+  const helpersDir = path.relative(BACKEND_ROOT, HELPERS_DIR);
+  assert.deepStrictEqual(
+    fs
+      .readdirSync(HELPERS_DIR)
+      .filter((n) => n.endsWith('.js') && !SCAN_EXEMPT.has(path.join(HELPERS_DIR, n)))
+      .filter((n) => !scanned.includes(path.join(helpersDir, n))),
+    [],
+    'the drift scan skipped a non-exempt .js file in test/helpers/',
+  );
 });
 
 // Non-vacuity for the detectors themselves: an over-narrow regex that matched
@@ -340,6 +399,9 @@ test('the drift scan actually reaches the spawn-based test files', () => {
 test('the port detector flags a hand-picked port but not a process.env read', () => {
   assert.ok(namesAPort("const server = spawn('node', [entry], { env: { PORT: '3993' } });"));
   assert.ok(namesAPort('const PORT = 3993;'));
+  // The quoted forms a spawn env can equally well be written in.
+  assert.ok(namesAPort("spawn('node', [entry], { env: { 'PORT': '3993' } });"));
+  assert.ok(namesAPort('env["PORT"] = \'3993\';'));
 
   assert.ok(!namesAPort('// Taken so far: 3989 cors-env, 3990 api-cache.'));
   assert.ok(!namesAPort('/* a block comment naming PORT = 3993 */'));
@@ -352,11 +414,19 @@ test('the port detector flags a hand-picked port but not a process.env read', ()
 });
 
 test('the direct-spawn detector flags spawning the server entry point itself', () => {
-  assert.ok(spawnsTheServerItself("spawn('node', [path.join(dir, 'src', 'server.js')]);"));
+  assert.ok(spawnsTheServerItself("spawn('node', [path.join(__dirname, '../src/server.js')]);"));
+  // The extension is optional: `require('../src/server')` boots the same
+  // hardcoded 3001, in-process, and a bare `includes('server.js')` misses it.
+  assert.ok(spawnsTheServerItself("const app = require('../src/server');"));
+  assert.ok(spawnsTheServerItself('spawn("node", ["src\\\\server.js"]);'));
+
   assert.ok(
     !spawnsTheServerItself('// same pattern as schema-boot.test.js, which boots server.js'),
   );
   assert.ok(!spawnsTheServerItself("const { spawnServer } = require('./helpers/spawnServer');"));
+  // A message that merely mentions the entry point is not a spawn — the bare
+  // substring form flagged this, which is why a whole file needed exempting.
+  assert.ok(!spawnsTheServerItself("assert.ok(ok, 'server.js must log the bound port');"));
 });
 
 // The guards themselves: the point of the helper is that the NEXT test file to

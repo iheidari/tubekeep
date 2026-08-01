@@ -54,7 +54,8 @@ before(async () => {
   // limiter runs ahead of that DB call regardless.
   //
   // The port comes from the helper (0XC-275) rather than being hand-picked —
-  // this file and ipv6-boot.test.js collided on 3993 exactly that way.
+  // ipv6-boot.test.js was written on this file's old 3993 and the two raced
+  // for the bind, caught in PR #33's review rather than on main.
   tmpDir = scratchCwd('tk-ratelimit-proxy-');
   ({ server, base } = await spawnServer({
     cwd: tmpDir,

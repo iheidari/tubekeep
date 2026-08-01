@@ -20,9 +20,12 @@ const path = require('node:path');
 
 // The port is the helper's business, not this file's: it spawns the server on
 // an OS-assigned ephemeral port and reads back the one actually bound. This
-// file is why that helper exists — it originally shipped on 3993, the port
+// file is why that helper exists — it was written on 3993, the port
 // rateLimit-proxy.test.js already used, and the two raced for the bind under
-// `node --test`'s per-file parallelism (0XC-275).
+// `node --test`'s per-file parallelism. That was caught during PR #33's review
+// and patched by moving to 3994, so `main` never carried the collision — but a
+// hand-picked port is a trap the next author springs again, which is what
+// 0XC-275 replaced with the helper.
 const { spawnServer, scratchCwd, removeScratchCwd } = require('./helpers/spawnServer');
 
 let tmpDir;
