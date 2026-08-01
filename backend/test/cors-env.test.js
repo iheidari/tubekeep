@@ -10,11 +10,8 @@
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
 
-const { spawnServer } = require('./helpers/spawnServer');
+const { spawnServer, scratchCwd, removeScratchCwd } = require('./helpers/spawnServer');
 
 const ORIGIN = 'http://cors-sentinel.test';
 let server;
@@ -22,20 +19,16 @@ let base;
 let tmpDir;
 
 before(async () => {
-  // A scratch cwd whose only .env sets FRONTEND_URL. dotenv reads cwd/.env, so
-  // the value can ONLY reach the server via .env loading — not the spawn env.
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-cors-'));
-  fs.writeFileSync(path.join(tmpDir, '.env'), `FRONTEND_URL=${ORIGIN}\n`);
-
-  // FRONTEND_URL is deleted from the child's env: it must come from .env, not
-  // inherited. The port comes from the helper (0XC-275) — never hand-picked,
-  // so this file can't collide with another that spawns a server in parallel.
+  // The scratch cwd's only .env sets FRONTEND_URL, and it is deleted from the
+  // child's env — so the value can ONLY reach the server by being loaded off
+  // disk, which is the whole claim under test.
+  tmpDir = scratchCwd('tk-cors-', `FRONTEND_URL=${ORIGIN}\n`);
   ({ server, base } = await spawnServer({ cwd: tmpDir, env: { FRONTEND_URL: undefined } }));
 });
 
 after(() => {
   if (server) server.kill('SIGKILL');
-  if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+  removeScratchCwd(tmpDir);
 });
 
 test('FRONTEND_URL from .env is applied as the CORS origin (dotenv is loaded)', async () => {

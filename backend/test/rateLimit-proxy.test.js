@@ -18,11 +18,8 @@
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
 
-const { spawnServer } = require('./helpers/spawnServer');
+const { spawnServer, scratchCwd, removeScratchCwd } = require('./helpers/spawnServer');
 
 let server;
 let base;
@@ -52,17 +49,13 @@ async function fireN(count, ip, extraHeaders = {}) {
 }
 
 before(async () => {
-  // Scratch cwd with an explicit empty .env so DATABASE_URL/FRONTEND_URL can
-  // ONLY come from the spawn env, never a real backend/.env on this machine
-  // (same isolation as cors-env.test.js / schema-boot.test.js). No DB is
-  // needed: /api/auth/request's store call is wrapped in try/catch and still
-  // answers its generic 200 on failure (see routes/auth.js), and the rate
+  // No DB is needed: /api/auth/request's store call is wrapped in try/catch and
+  // still answers its generic 200 on failure (see routes/auth.js), and the rate
   // limiter runs ahead of that DB call regardless.
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-ratelimit-proxy-'));
-  fs.writeFileSync(path.join(tmpDir, '.env'), '');
-
+  //
   // The port comes from the helper (0XC-275) rather than being hand-picked —
   // this file and ipv6-boot.test.js collided on 3993 exactly that way.
+  tmpDir = scratchCwd('tk-ratelimit-proxy-');
   ({ server, base } = await spawnServer({
     cwd: tmpDir,
     env: { DATABASE_URL: undefined, FRONTEND_URL: undefined },
@@ -71,7 +64,7 @@ before(async () => {
 
 after(() => {
   if (server) server.kill('SIGKILL');
-  if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+  removeScratchCwd(tmpDir);
 });
 
 test('the real server buckets by X-Forwarded-For client, not one shared IP (trust proxy wired end-to-end)', async () => {

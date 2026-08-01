@@ -14,26 +14,51 @@
 // enforced by the drift guard in spawnServer.test.js.
 
 const { spawn } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const SERVER_ENTRY = path.join(__dirname, '..', '..', 'src', 'server.js');
 
 // server.js logs this from inside app.listen's callback using
 // `server.address().port` — the port the OS actually bound, never the
-// requested one. That's what makes PORT=0 legible from out here. If that log
-// line ever regressed to echoing `process.env.PORT`, every spawn below would
-// poll a dead port 0 for the full BOOT_TIMEOUT_MS and then throw something
-// that points nowhere near the cause — which is why spawnServer.test.js pins
-// the `server.address().port` contract at the source level, so the regression
-// fails instantly and by name instead.
+// requested one. That's what makes PORT=0 legible from out here, and why
+// spawnServer.test.js pins that contract at the source level: an echoed
+// `process.env.PORT` would print `localhost:0`, and every spawn below would
+// poll a dead port for the full BOOT_TIMEOUT_MS before throwing something that
+// points nowhere near the cause.
 const LISTENING_RE = /Server running on http:\/\/localhost:(\d+)/;
-
-// Which files the port drift guard scans. Covers the spawn-based suites in
-// `test/` and the colocated `*.test.js` files under `src/`.
-const SERVER_TEST_FILE_GLOBS = /\.test\.js$/;
 
 const BOOT_TIMEOUT_MS = 20_000;
 const POLL_INTERVAL_MS = 50;
+
+/**
+ * Make a throwaway directory to spawn a child in, holding only the `.env` it
+ * should see.
+ *
+ * server.js runs `dotenv.config()` against its cwd, so a child spawned in the
+ * inherited cwd reads whatever real `backend/.env` this machine has. Deleting a
+ * variable from the spawn `env` is not enough on its own — dotenv loads it
+ * straight back off disk — so a test meaning to exercise an "unset
+ * DATABASE_URL / FRONTEND_URL" path would silently assert against the real
+ * values instead, and behave differently on a developer machine than in CI.
+ *
+ * @param {string} prefix `mkdtemp` prefix, e.g. `'tk-cors-'`.
+ * @param {string} [contents] `.env` body. Empty (the default) means "configured
+ *   with nothing"; pass a body when the `.env` load itself is under test.
+ * @returns {string} Absolute path; pass it as `spawnServer`'s `cwd` and hand it
+ *   to `removeScratchCwd` on teardown.
+ */
+function scratchCwd(prefix, contents = '') {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  fs.writeFileSync(path.join(dir, '.env'), contents);
+  return dir;
+}
+
+/** Teardown counterpart to `scratchCwd`. A no-op if the dir was never made. */
+function removeScratchCwd(dir) {
+  if (dir) fs.rmSync(dir, { recursive: true, force: true });
+}
 
 /**
  * Spawn `src/server.js` as a child process on an ephemeral port and resolve
@@ -141,4 +166,4 @@ async function spawnServer({ cwd, env: envOverrides = {}, execArgv = [] } = {}) 
   throw bootFailure(`Test server did not start within ${BOOT_TIMEOUT_MS}ms.`);
 }
 
-module.exports = { spawnServer, SERVER_TEST_FILE_GLOBS };
+module.exports = { spawnServer, scratchCwd, removeScratchCwd };

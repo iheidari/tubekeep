@@ -22,20 +22,9 @@ const { test } = require('node:test');
 const assert = require('node:assert');
 const { once } = require('node:events');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
-const { spawnServer, SERVER_TEST_FILE_GLOBS } = require('./spawnServer');
-
-// A scratch cwd whose only `.env` is empty, so server.js's `dotenv.config()`
-// can't pick up a real backend/.env on this machine (same isolation the
-// spawn-based test files use). Registered for removal on the returned handle's
-// teardown so each test stays self-contained.
-function scratchCwd(prefix) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
-  fs.writeFileSync(path.join(dir, '.env'), '');
-  return dir;
-}
+const { spawnServer, scratchCwd, removeScratchCwd } = require('./spawnServer');
 
 test('resolves with the port the OS actually bound, and it serves /health', async () => {
   const cwd = scratchCwd('tk-spawn-helper-');
@@ -49,7 +38,7 @@ test('resolves with the port the OS actually bound, and it serves /health', asyn
     assert.strictEqual((await res.json()).status, 'ok');
   } finally {
     server.kill('SIGKILL');
-    fs.rmSync(cwd, { recursive: true, force: true });
+    removeScratchCwd(cwd);
   }
 });
 
@@ -72,8 +61,8 @@ test('two servers running at once get distinct ports (the collision this replace
   } finally {
     a.server.kill('SIGKILL');
     b.server.kill('SIGKILL');
-    fs.rmSync(cwdA, { recursive: true, force: true });
-    fs.rmSync(cwdB, { recursive: true, force: true });
+    removeScratchCwd(cwdA);
+    removeScratchCwd(cwdB);
   }
 });
 
@@ -90,7 +79,7 @@ test('an explicit env override reaches the child', async () => {
     assert.strictEqual(res.headers.get('access-control-allow-origin'), origin);
   } finally {
     server.kill('SIGKILL');
-    fs.rmSync(cwd, { recursive: true, force: true });
+    removeScratchCwd(cwd);
   }
 });
 
@@ -144,7 +133,7 @@ test('an `undefined` env value deletes a variable the child would otherwise inhe
   } finally {
     if (previous === undefined) delete process.env.FRONTEND_URL;
     else process.env.FRONTEND_URL = previous;
-    fs.rmSync(cwd, { recursive: true, force: true });
+    removeScratchCwd(cwd);
   }
 });
 
@@ -176,7 +165,7 @@ test('PORT cannot be overridden or unset by a caller', async () => {
       }
     }
   } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
+    removeScratchCwd(cwd);
   }
 });
 
@@ -210,7 +199,7 @@ test('execArgv is passed to the child node process ahead of the entry point', as
   } finally {
     kill();
     await once(server, 'exit');
-    fs.rmSync(cwd, { recursive: true, force: true });
+    removeScratchCwd(cwd);
   }
 });
 
@@ -229,7 +218,7 @@ test("fails loudly with the child's stderr when the server can't boot", async ()
       },
     );
   } finally {
-    fs.rmSync(cwd, { recursive: true, force: true });
+    removeScratchCwd(cwd);
   }
 });
 
@@ -300,25 +289,31 @@ function spawnsTheServerItself(source) {
   return stripComments(source).includes('server.js');
 }
 
-function collectScannedTestFiles(root) {
+// Every `*.test.js` under backend/ — the spawn-based suites in `test/` and the
+// colocated ones under `src/` — read once, since all three scans below share
+// the same corpus.
+const SCANNED_TEST_FILES = (function collectScannedTestFiles(root) {
   const found = [];
   const walk = (dir) => {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue;
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) walk(full);
-      else if (SERVER_TEST_FILE_GLOBS.test(entry.name) && !SCAN_EXEMPT.has(full)) found.push(full);
+      else if (entry.name.endsWith('.test.js') && !SCAN_EXEMPT.has(full)) found.push(full);
     }
   };
   walk(root);
   return found;
-}
+})(BACKEND_ROOT).map((full) => ({
+  file: path.relative(BACKEND_ROOT, full),
+  source: fs.readFileSync(full, 'utf8'),
+}));
 
 // Non-vacuity for the two scans below. Both assert an EMPTY offender list, so a
 // walk that silently reached nothing — wrong root, a changed extension filter, a
 // widened exemption — would make them pass while policing nothing at all.
 test('the drift scan actually reaches the spawn-based test files', () => {
-  const scanned = collectScannedTestFiles(BACKEND_ROOT).map((f) => path.relative(BACKEND_ROOT, f));
+  const scanned = SCANNED_TEST_FILES.map(({ file }) => file);
 
   // The five files 0XC-275 migrated: if the scan can't see these, it can't
   // catch the next one that regresses.
@@ -364,29 +359,26 @@ test('the direct-spawn detector flags spawning the server entry point itself', (
   assert.ok(!spawnsTheServerItself("const { spawnServer } = require('./helpers/spawnServer');"));
 });
 
-// The drift guard the ticket asks for: the point of this helper is that the
-// NEXT test file to spawn a server can't quietly reintroduce a hand-picked
-// port. Only the helper itself may name a PORT.
-test('no test file names a server PORT — only the helper does', () => {
-  const offenders = collectScannedTestFiles(BACKEND_ROOT)
-    .filter((full) => namesAPort(fs.readFileSync(full, 'utf8')))
-    .map((full) => path.relative(BACKEND_ROOT, full));
+// The guards themselves: the point of the helper is that the NEXT test file to
+// spawn a server can't quietly reintroduce a hand-picked port. Only the helper
+// may name a PORT, and only the helper may name the entry point.
+for (const { title, detect, complaint } of [
+  {
+    title: 'no test file names a server PORT — only the helper does',
+    detect: namesAPort,
+    complaint: 'hardcode a server port instead of using test/helpers/spawnServer.js',
+  },
+  {
+    title: 'no test file spawns the server itself — the helper is the only entry point',
+    detect: spawnsTheServerItself,
+    complaint: 'launch the server entry point directly instead of via test/helpers/spawnServer.js',
+  },
+]) {
+  test(title, () => {
+    const offenders = SCANNED_TEST_FILES.filter(({ source }) => detect(source)).map(
+      ({ file }) => file,
+    );
 
-  assert.deepStrictEqual(
-    offenders,
-    [],
-    `these test files hardcode a server port instead of using test/helpers/spawnServer.js: ${offenders.join(', ')}`,
-  );
-});
-
-test('no test file spawns the server itself — the helper is the only entry point', () => {
-  const offenders = collectScannedTestFiles(BACKEND_ROOT)
-    .filter((full) => spawnsTheServerItself(fs.readFileSync(full, 'utf8')))
-    .map((full) => path.relative(BACKEND_ROOT, full));
-
-  assert.deepStrictEqual(
-    offenders,
-    [],
-    `these test files launch src/server.js directly instead of via test/helpers/spawnServer.js: ${offenders.join(', ')}`,
-  );
-});
+    assert.deepStrictEqual(offenders, [], `these test files ${complaint}: ${offenders.join(', ')}`);
+  });
+}

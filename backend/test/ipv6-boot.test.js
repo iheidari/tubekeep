@@ -16,7 +16,6 @@
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 
 // The port is the helper's business, not this file's: it spawns the server on
@@ -24,7 +23,7 @@ const path = require('node:path');
 // file is why that helper exists — it originally shipped on 3993, the port
 // rateLimit-proxy.test.js already used, and the two raced for the bind under
 // `node --test`'s per-file parallelism (0XC-275).
-const { spawnServer } = require('./helpers/spawnServer');
+const { spawnServer, scratchCwd, removeScratchCwd } = require('./helpers/spawnServer');
 
 let tmpDir;
 let connectSpyPath;
@@ -47,10 +46,7 @@ net.connect = function ipv6ProbeSpyConnect(...args) {
 `;
 
 before(() => {
-  // Same reasoning as schema-boot.test.js: a scratch cwd with an empty `.env`
-  // so server.js's dotenv.config() can't silently pick up a real backend/.env.
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-ipv6-boot-'));
-  fs.writeFileSync(path.join(tmpDir, '.env'), '');
+  tmpDir = scratchCwd('tk-ipv6-boot-');
 
   // Written into the scratch tmpDir (outside the repo, so it can never be
   // picked up by node --test's own directory-based file discovery) rather
@@ -60,7 +56,7 @@ before(() => {
 });
 
 after(() => {
-  if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+  removeScratchCwd(tmpDir);
 });
 
 function bootServer(extraEnv, execArgv = []) {
