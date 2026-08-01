@@ -99,7 +99,6 @@ jobs:
       # Keyed on the lockfile because it pins the exact @playwright/test version,
       # which is what determines the browser build that gets downloaded.
       - name: Cache Playwright browser
-        id: playwright-cache
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright

@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const here = dirname(fileURLToPath(import.meta.url))
-const TAILWIND_CDN_STUB = readFileSync(join(here, '../../fixtures/tailwind-cdn-stub.js'), 'utf8')
+const TAILWIND_CDN_STUB = readFileSync(join(here, '../../stubs/tailwind-cdn-stub.js'), 'utf8')
 
 // Hosts the app's index.html reaches for at runtime. Each is answered locally so
 // the suite never opens a socket to the internet — see the module comment below.
