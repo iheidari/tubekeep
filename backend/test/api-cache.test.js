@@ -13,21 +13,35 @@
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 const { spawnServer } = require('./helpers/spawnServer');
 
 let server;
 let base;
+let tmpDir;
 
 before(async () => {
+  // A scratch cwd with an empty `.env`, the same isolation the other
+  // spawn-based files use: server.js runs `dotenv.config()` against its cwd,
+  // so spawning with the inherited one would pick up a developer's real
+  // backend/.env (DATABASE_URL, FRONTEND_URL). Nothing here depends on either,
+  // but a spawn that behaves differently on a developer machine than in CI is
+  // the seed of the next "passes locally" mystery.
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-api-cache-'));
+  fs.writeFileSync(path.join(tmpDir, '.env'), '');
+
   // The helper spawns the real server on an OS-assigned port and waits for it
   // to answer /health (0XC-275) — no hand-picked port to collide with the
   // other spawn-based test files this runs in parallel with.
-  ({ server, base } = await spawnServer());
+  ({ server, base } = await spawnServer({ cwd: tmpDir, env: { DATABASE_URL: undefined } }));
 });
 
 after(() => {
   if (server) server.kill('SIGKILL');
+  if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
 // Probe `/api/auth/me`: a public, always-present `/api` route (returns 401 with

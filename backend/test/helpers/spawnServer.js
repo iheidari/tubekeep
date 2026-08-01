@@ -20,9 +20,12 @@ const SERVER_ENTRY = path.join(__dirname, '..', '..', 'src', 'server.js');
 
 // server.js logs this from inside app.listen's callback using
 // `server.address().port` — the port the OS actually bound, never the
-// requested one. That's what makes PORT=0 legible from out here; if that log
-// line ever goes back to echoing `process.env.PORT`, every spawn below fails
-// fast rather than silently polling port 0.
+// requested one. That's what makes PORT=0 legible from out here. If that log
+// line ever regressed to echoing `process.env.PORT`, every spawn below would
+// poll a dead port 0 for the full BOOT_TIMEOUT_MS and then throw something
+// that points nowhere near the cause — which is why spawnServer.test.js pins
+// the `server.address().port` contract at the source level, so the regression
+// fails instantly and by name instead.
 const LISTENING_RE = /Server running on http:\/\/localhost:(\d+)/;
 
 // Which files the port drift guard scans. Covers the spawn-based suites in
@@ -51,11 +54,15 @@ const POLL_INTERVAL_MS = 50;
  *   captured stdout/stderr in the message, rather than an opaque timeout.
  */
 async function spawnServer({ cwd, env: envOverrides = {}, execArgv = [] } = {}) {
-  // PORT is set last and unconditionally: the helper owns the port, so a caller
-  // can't reintroduce the collision this exists to prevent.
+  // An `undefined` override deletes the variable — but PORT is exempt from
+  // both halves of that: it's set last so a caller can't override it, and
+  // skipped in the delete loop so a caller can't *unset* it either. Without
+  // the exemption, `env: { PORT: undefined }` would strip it and the child
+  // would fall back to server.js's hardcoded 3001 — reintroducing exactly the
+  // fixed-port collision this helper exists to prevent.
   const env = { ...process.env, NODE_ENV: 'test', ...envOverrides, PORT: '0' };
   for (const [key, value] of Object.entries(envOverrides)) {
-    if (value === undefined) delete env[key];
+    if (value === undefined && key !== 'PORT') delete env[key];
   }
 
   const server = spawn('node', [...execArgv, SERVER_ENTRY], {

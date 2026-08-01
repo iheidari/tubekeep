@@ -66,7 +66,11 @@ after(() => {
 function bootServer(extraEnv, execArgv = []) {
   return spawnServer({
     cwd: tmpDir,
-    env: { DATABASE_URL: undefined, ...extraEnv },
+    // DATABASE_URL is deleted LAST, after extraEnv, so a caller can't reinstate
+    // it by accident — the hermetic-suite guarantee must not depend on what a
+    // particular test passes in. (Pre-0XC-275 this file spread extraEnv first
+    // and then `delete env.DATABASE_URL`, i.e. the same unconditional order.)
+    env: { ...extraEnv, DATABASE_URL: undefined },
     execArgv,
   });
 }
