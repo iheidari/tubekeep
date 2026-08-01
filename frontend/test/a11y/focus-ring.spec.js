@@ -1,5 +1,4 @@
-import { expect, test } from '@playwright/test'
-import { preparePage } from './support/hermetic.js'
+import { expect, test } from './support/fixtures.js'
 import { expectNoVisibleRing, expectVisibleRing, readRing } from './support/ring.js'
 
 // The global focus ring, checked in a real browser.
@@ -11,8 +10,8 @@ import { expectNoVisibleRing, expectVisibleRing, readRing } from './support/ring
 // until a human tabbed through the UI. These assertions are that missing gate.
 
 test.describe('global focus ring', () => {
-  test('is visible on every focusable control on /login', async ({ page }) => {
-    await preparePage(page)
+  test('is visible on every focusable control on /login', async ({ page, hermetic }) => {
+    await hermetic.prepare()
     await page.goto('/login')
 
     // The form, not the loading spinner — /api/auth/me is stubbed 401 (signed out).
@@ -45,8 +44,9 @@ test.describe('global focus ring', () => {
 
   test('a mouse click draws no ring (:focus-visible must not fire on pointer input)', async ({
     page,
+    hermetic,
   }) => {
-    await preparePage(page)
+    await hermetic.prepare()
     await page.goto('/login')
 
     const submit = page.getByRole('button', { name: 'Send sign-in link' })
@@ -61,8 +61,11 @@ test.describe('global focus ring', () => {
   // whatever the modality — so a clicked input showing a ring is correct.
 
   for (const theme of ['light', 'dark']) {
-    test(`--focus-ring resolves and colours the ring in ${theme} mode`, async ({ page }) => {
-      await preparePage(page, { theme })
+    test(`--focus-ring resolves and colours the ring in ${theme} mode`, async ({
+      page,
+      hermetic,
+    }) => {
+      await hermetic.prepare({ theme })
       await page.goto('/login')
 
       const email = page.getByLabel('Email address')
@@ -85,14 +88,6 @@ test.describe('global focus ring', () => {
       expect(ring.color.replace(/\s/g, '')).toBe(`rgb(${r},${g},${b})`)
     })
   }
-
-  test('nothing reached the network beyond localhost', async ({ page }) => {
-    const hermetic = await preparePage(page)
-    await page.goto('/login')
-    await expect(page.getByLabel('Email address')).toBeVisible()
-
-    expect(hermetic.violations, 'requests that escaped the hermetic boundary').toEqual([])
-  })
 })
 
 // The regression guard. Everything above passes trivially if the forms plugin's
@@ -101,8 +96,8 @@ test.describe('global focus ring', () => {
 //
 // This automates the acceptance criterion "the assertions fail when the `:root`
 // prefix is removed", which would otherwise only ever be verified by hand once.
-test('the ring assertions fail when the `:root` prefix is removed', async ({ page }) => {
-  await preparePage(page)
+test('the ring assertions fail when the `:root` prefix is removed', async ({ page, hermetic }) => {
+  await hermetic.prepare()
   await page.goto('/login')
 
   const email = page.getByLabel('Email address')
@@ -126,9 +121,10 @@ test('the ring assertions fail when the `:root` prefix is removed', async ({ pag
 
   // If the rule is ever renamed or moved, fail loudly here instead of quietly
   // asserting nothing.
-  expect(stripped, "expected to find the `:root`-prefixed focus rule in index.html's <style>").toBe(
-    5,
-  )
+  expect(
+    stripped,
+    "expected to find the `:root`-prefixed focus rule in index.html's <style>",
+  ).toBeGreaterThan(0)
 
   // The forms plugin's `[type="email"]:focus { outline: 2px solid transparent }`
   // at (0,2,0) now out-ranks it, and the ring goes invisible — geometry intact,

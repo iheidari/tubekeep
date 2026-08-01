@@ -1,5 +1,4 @@
-import { expect, test } from '@playwright/test'
-import { preparePage } from './support/hermetic.js'
+import { expect, test } from './support/fixtures.js'
 
 // The repo's rule (CLAUDE.md → Styling system): a button whose inactive state
 // carries a user-facing reason uses `aria-disabled` + a click guard, never native
@@ -47,8 +46,8 @@ const SIGNED_IN = {
 }
 
 test.describe('inactive-with-a-reason controls', () => {
-  test('UrlInput: the submit button with no URL entered', async ({ page }) => {
-    await preparePage(page, { api: SIGNED_IN })
+  test('UrlInput: the submit button with no URL entered', async ({ page, hermetic }) => {
+    await hermetic.prepare({ api: SIGNED_IN })
     await page.goto('/')
 
     const submit = page.getByRole('button', { name: /get formats/i })
@@ -65,8 +64,8 @@ test.describe('inactive-with-a-reason controls', () => {
     await expect(page).toHaveURL(/\/$/)
   })
 
-  test('FormatSelector: a format that exceeds the storage quota', async ({ page }) => {
-    await preparePage(page, {
+  test('FormatSelector: a format that exceeds the storage quota', async ({ page, hermetic }) => {
+    await hermetic.prepare({
       api: {
         ...SIGNED_IN,
         // 4 GB format against 10 MB of remaining quota → downloadBlockReason
@@ -92,7 +91,6 @@ test.describe('inactive-with-a-reason controls', () => {
             data: {
               title: 'A very large video',
               duration: 600,
-              thumbnail: '',
               sourceKey: 'youtube:test123',
               formats: {
                 video: [
@@ -122,12 +120,12 @@ test.describe('inactive-with-a-reason controls', () => {
     await expect(page.getByText('Over your storage quota')).toHaveCount(1)
   })
 
-  test('MoveToCloud: a download too close to expiry to move', async ({ page }) => {
+  test('MoveToCloud: a download too close to expiry to move', async ({ page, hermetic }) => {
     // Files expire 1h after creation and a move needs 15 min of runway, so a row
     // created 50 min ago lands in the "expiring soon" branch.
     const createdAt = new Date(Date.now() - 50 * 60 * 1000).toISOString()
 
-    await preparePage(page, {
+    await hermetic.prepare({
       api: {
         ...SIGNED_IN,
         '**/api/files': {
