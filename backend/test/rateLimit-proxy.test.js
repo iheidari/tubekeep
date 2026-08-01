@@ -18,14 +18,14 @@
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
-const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const PORT = 3993;
-const base = `http://localhost:${PORT}`;
+const { spawnServer } = require('./helpers/spawnServer');
+
 let server;
+let base;
 let tmpDir;
 
 async function requestAs(ip, extraHeaders = {}) {
@@ -61,26 +61,12 @@ before(async () => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-ratelimit-proxy-'));
   fs.writeFileSync(path.join(tmpDir, '.env'), '');
 
-  const env = { ...process.env, PORT: String(PORT), NODE_ENV: 'test' };
-  delete env.DATABASE_URL;
-  delete env.FRONTEND_URL;
-
-  server = spawn('node', [path.join(__dirname, '..', 'src', 'server.js')], {
+  // The port comes from the helper (0XC-275) rather than being hand-picked —
+  // this file and ipv6-boot.test.js collided on 3993 exactly that way.
+  ({ server, base } = await spawnServer({
     cwd: tmpDir,
-    env,
-    stdio: 'ignore',
-  });
-
-  for (let i = 0; i < 50; i++) {
-    try {
-      const res = await fetch(`${base}/health`);
-      if (res.ok) return;
-    } catch {
-      // not up yet
-    }
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  throw new Error('Test server did not start in time');
+    env: { DATABASE_URL: undefined, FRONTEND_URL: undefined },
+  }));
 });
 
 after(() => {

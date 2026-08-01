@@ -10,15 +10,15 @@
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
-const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const PORT = 3989;
-const base = `http://localhost:${PORT}`;
+const { spawnServer } = require('./helpers/spawnServer');
+
 const ORIGIN = 'http://cors-sentinel.test';
 let server;
+let base;
 let tmpDir;
 
 before(async () => {
@@ -27,25 +27,10 @@ before(async () => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-cors-'));
   fs.writeFileSync(path.join(tmpDir, '.env'), `FRONTEND_URL=${ORIGIN}\n`);
 
-  const env = { ...process.env, PORT: String(PORT), NODE_ENV: 'test' };
-  delete env.FRONTEND_URL; // must come from .env, not inherited
-
-  server = spawn('node', [path.join(__dirname, '..', 'src', 'server.js')], {
-    cwd: tmpDir,
-    env,
-    stdio: 'ignore',
-  });
-
-  for (let i = 0; i < 50; i++) {
-    try {
-      const res = await fetch(`${base}/health`);
-      if (res.ok) return;
-    } catch {
-      // not up yet
-    }
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  throw new Error('Test server did not start in time');
+  // FRONTEND_URL is deleted from the child's env: it must come from .env, not
+  // inherited. The port comes from the helper (0XC-275) — never hand-picked,
+  // so this file can't collide with another that spawns a server in parallel.
+  ({ server, base } = await spawnServer({ cwd: tmpDir, env: { FRONTEND_URL: undefined } }));
 });
 
 after(() => {

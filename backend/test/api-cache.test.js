@@ -13,29 +13,17 @@
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
-const { spawn } = require('node:child_process');
-const path = require('node:path');
 
-const PORT = 3990;
-const base = `http://localhost:${PORT}`;
+const { spawnServer } = require('./helpers/spawnServer');
+
 let server;
+let base;
 
 before(async () => {
-  server = spawn('node', [path.join(__dirname, '..', 'src', 'server.js')], {
-    env: { ...process.env, PORT: String(PORT), NODE_ENV: 'test' },
-    stdio: 'ignore',
-  });
-  // Poll /health until the server is listening.
-  for (let i = 0; i < 50; i++) {
-    try {
-      const res = await fetch(`${base}/health`);
-      if (res.ok) return;
-    } catch {
-      // not up yet
-    }
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  throw new Error('Test server did not start in time');
+  // The helper spawns the real server on an OS-assigned port and waits for it
+  // to answer /health (0XC-275) — no hand-picked port to collide with the
+  // other spawn-based test files this runs in parallel with.
+  ({ server, base } = await spawnServer());
 });
 
 after(() => {

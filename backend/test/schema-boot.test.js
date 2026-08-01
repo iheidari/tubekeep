@@ -12,17 +12,17 @@
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
-const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const PORT = 3992;
-const base = `http://localhost:${PORT}`;
+const { spawnServer } = require('./helpers/spawnServer');
+
 let server;
+let base;
+let stdout;
+let stderr;
 let tmpDir;
-let stdout = '';
-let stderr = '';
 
 before(async () => {
   // A scratch cwd whose `.env` does NOT set DATABASE_URL. Deleting the var
@@ -35,31 +35,14 @@ before(async () => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-schema-boot-'));
   fs.writeFileSync(path.join(tmpDir, '.env'), '');
 
-  const env = { ...process.env, PORT: String(PORT), NODE_ENV: 'test' };
-  delete env.DATABASE_URL; // must exercise the skip path, not inherit a real one
-
-  server = spawn('node', [path.join(__dirname, '..', 'src', 'server.js')], {
+  // DATABASE_URL is deleted from the child's env: this must exercise the skip
+  // path, not inherit a real one. The port comes from the helper (0XC-275),
+  // which also captures the child's stdout/stderr — the two streams this
+  // test's assertions read.
+  ({ server, base, stdout, stderr } = await spawnServer({
     cwd: tmpDir,
-    env,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  server.stdout.on('data', (chunk) => {
-    stdout += chunk.toString();
-  });
-  server.stderr.on('data', (chunk) => {
-    stderr += chunk.toString();
-  });
-
-  for (let i = 0; i < 50; i++) {
-    try {
-      const res = await fetch(`${base}/health`);
-      if (res.ok) return;
-    } catch {
-      // not up yet
-    }
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  throw new Error('Test server did not start in time');
+    env: { DATABASE_URL: undefined },
+  }));
 });
 
 after(() => {
@@ -79,11 +62,11 @@ test('server boots and serves /health with no DATABASE_URL configured (ensureSch
   // should appear — the function should have returned immediately on the
   // missing DATABASE_URL check, before ever touching getPool()/applySchema().
   assert.ok(
-    !stdout.includes('Database schema up to date'),
+    !stdout().includes('Database schema up to date'),
     'ensureSchema must not attempt a schema apply when DATABASE_URL is unset',
   );
   assert.ok(
-    !stderr.includes('Failed to apply database schema'),
+    !stderr().includes('Failed to apply database schema'),
     'ensureSchema must not attempt (and fail) a schema apply when DATABASE_URL is unset',
   );
 });

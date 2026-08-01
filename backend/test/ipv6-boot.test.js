@@ -15,19 +15,17 @@
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
-const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-// Must be unique across every test file that spawns a real server — node --test
-// runs FILES in parallel, so a shared port makes one server lose the bind
-// (EADDRINUSE) and its file's requests fail with ECONNREFUSED, while the /health
-// poll can also succeed against the *other* file's server and assert on the
-// wrong process. Taken so far: 3989 cors-env, 3990 api-cache, 3992 schema-boot,
-// 3993 rateLimit-proxy.
-const PORT = 3994;
-const base = `http://localhost:${PORT}`;
+// The port is the helper's business, not this file's: it spawns the server on
+// an OS-assigned ephemeral port and reads back the one actually bound. This
+// file is why that helper exists — it originally shipped on 3993, the port
+// rateLimit-proxy.test.js already used, and the two raced for the bind under
+// `node --test`'s per-file parallelism (0XC-275).
+const { spawnServer } = require('./helpers/spawnServer');
+
 let tmpDir;
 let connectSpyPath;
 
@@ -66,40 +64,10 @@ after(() => {
 });
 
 function bootServer(extraEnv, execArgv = []) {
-  return new Promise((resolve, reject) => {
-    const env = { ...process.env, PORT: String(PORT), NODE_ENV: 'test', ...extraEnv };
-    delete env.DATABASE_URL;
-
-    const server = spawn('node', [...execArgv, path.join(__dirname, '..', 'src', 'server.js')], {
-      cwd: tmpDir,
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    let stdout = '';
-    let stderr = '';
-    server.stdout.on('data', (chunk) => {
-      stdout += chunk.toString();
-    });
-    server.stderr.on('data', (chunk) => {
-      stderr += chunk.toString();
-    });
-
-    (async () => {
-      for (let i = 0; i < 50; i++) {
-        try {
-          const res = await fetch(`${base}/health`);
-          if (res.ok) {
-            resolve({ server, stdout: () => stdout, stderr: () => stderr });
-            return;
-          }
-        } catch {
-          // not up yet
-        }
-        await new Promise((r) => setTimeout(r, 100));
-      }
-      reject(new Error(`Test server did not start in time. stderr: ${stderr}`));
-    })();
+  return spawnServer({
+    cwd: tmpDir,
+    env: { DATABASE_URL: undefined, ...extraEnv },
+    execArgv,
   });
 }
 
