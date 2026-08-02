@@ -29,9 +29,29 @@ const { applySchema } = require('./dbInit');
 const { startCleanupScheduler } = require('./services/cleanup');
 const { downloadsDir } = require('./utils/storage');
 const { rateLimit } = require('./utils/rateLimit');
+const { decideForceIpv4 } = require('./services/ipv6');
+const { setForceIpv4 } = require('./services/ytdlp');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Production sits behind exactly one proxy hop: Cloudflare, terminating
+// straight into this container (docker-compose maps the port directly, no
+// nginx/Caddy in front — see CLAUDE.md's Deployment section). `trust proxy: 1`
+// tells Express to read the client's real address from the outermost
+// X-Forwarded-For entry set by that one hop, so `req.ip` reflects the actual
+// visitor instead of Cloudflare's own edge IP for every request (which
+// collapsed every client into one rate-limit bucket — 0XC-128). A blanket
+// `true` would be wrong here: it trusts every hop in an X-Forwarded-For chain,
+// letting a client forge extra entries to mint unlimited buckets.
+//
+// This is still only the fallback path, though: X-Forwarded-For is content a
+// client controls, not something Cloudflare's edge authenticates — a request
+// that skips Cloudflare entirely can present any chain it likes. rateLimit.js
+// prefers the CF-Connecting-IP header (which Cloudflare does overwrite) for
+// exactly that reason; `req.ip`/`trust proxy` only matters as its fallback
+// for local dev and non-Cloudflare deploys.
+app.set('trust proxy', 1);
 
 // Fail fast on missing required secrets rather than degrading silently (a missing
 // JWT_SECRET otherwise makes every session 401 while /verify 500s). Hard error in
@@ -214,7 +234,30 @@ async function ensureSchema() {
   }
 }
 
-ensureSchema().then(() => {
+// Resolve, once at boot, whether yt-dlp calls should force IPv4 (services/ipv6.js):
+// an explicit YTDLP_FORCE_IPV4 wins outright; otherwise a short, timeout-bounded
+// probe auto-detects a black-holed IPv6 route (the ~85s-per-call stall this
+// replaces manual diagnosis for, 0XC-126) and enables it. Skipped in the test
+// suite, which must reach no real network — the same reasoning as ensureSchema's
+// DATABASE_URL skip above, just keyed on NODE_ENV since there's no env var whose
+// mere presence signals "network available" the way DATABASE_URL does for Postgres.
+// This is a best-effort convenience, never a boot requirement — decideForceIpv4
+// already falls back to `false` internally rather than rejecting, but this
+// try/catch matches ensureSchema's defensive shape above in case that ever
+// changes, so a network hiccup here can never be what stops the server from
+// starting.
+async function ensureIpv4Decision() {
+  try {
+    const forceIpv4 = await decideForceIpv4({ skipProbe: process.env.NODE_ENV === 'test' });
+    setForceIpv4(forceIpv4);
+  } catch (err) {
+    console.warn(
+      `⚠️  IPv6 probe boot step failed unexpectedly (${err.message}) — leaving IPv4 unforced.`,
+    );
+  }
+}
+
+Promise.all([ensureSchema(), ensureIpv4Decision()]).then(() => {
   startCleanupScheduler({ store: downloadsStore });
 
   app.listen(PORT, () => {

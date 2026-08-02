@@ -48,6 +48,19 @@ test('applySchema throws a clear error when a downloads column is missing', asyn
   await assert.rejects(() => applySchema(pool), /downloads.*completed_at/s);
 });
 
+// source_key (0XC-117) is read unconditionally in downloadsStore.js's INSERT
+// column list, so a database missing it must fail loudly at boot rather than
+// erroring on every download start — the same guarantee completed_at/moved_info
+// already have. Now covered by the parsed set rather than a hand-maintained one.
+test('applySchema throws when source_key is missing', async () => {
+  const columnsByTable = {
+    ...realColumns,
+    downloads: realColumns.downloads.filter((column) => column !== 'source_key'),
+  };
+  const pool = fakePool(columnsByTable);
+  await assert.rejects(() => applySchema(pool), /downloads.*source_key/s);
+});
+
 test('applySchema throws when a users column is missing (previously uncovered by the hand-maintained list)', async () => {
   const columnsByTable = {
     ...realColumns,

@@ -79,6 +79,19 @@ function createCloudRouter({ store }) {
       if (!own) {
         return res.status(404).json({ success: false, error: 'Download not found' });
       }
+      // Must be a landed download, not one still in flight. The directory-based
+      // getDownloadDir/hasMedia check in jobs.js sees a still-downloading id's
+      // partial file(s) as "media" too, so without this the job would upload a
+      // partial file and then delete the directory a live yt-dlp process is
+      // still writing to. `status` (not `expired`/`moved`) is the right gate —
+      // a completed-but-expired/moved row correctly still 404s below via
+      // hasMedia() finding nothing on disk, and this route shouldn't duplicate
+      // that check.
+      if (own.status !== 'complete') {
+        return res
+          .status(409)
+          .json({ success: false, error: 'This download is still in progress' });
+      }
     } catch (err) {
       console.error(`❌ Cloud upload ownership check failed (${downloadId}): ${err.message}`);
       return res.status(500).json({ success: false, error: 'Failed to start upload' });
