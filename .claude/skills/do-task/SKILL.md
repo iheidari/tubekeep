@@ -1,6 +1,6 @@
 ---
 name: do-task
-description: Pick up the highest-priority Linear issue labeled "Ready to play" (or a specific issue when given its identifier), move it to In Progress, implement it (in an isolated git worktree only when another task is already in flight — otherwise a local branch), commit, then run focused passes in subagents (docs, test coverage, a11y, SEO/GEO/AEO in parallel; then simplify; then thermos review) committing after each, open a PR, move the issue to In Review, watch its CI to green, then move the issue to Done only after you confirm the PR is merged. Use when the user runs /do-task [ISSUE] or says "do task", "do the next task", or "do ABC-12".
+description: Pick up the highest-priority Linear issue labeled "Ready to play" (or a specific issue when given its identifier), move it to In Progress, implement it (in an isolated git worktree only when another task is already in flight — otherwise a local branch), commit, then run focused passes in subagents (docs, test coverage, a11y, SEO/GEO/AEO in parallel; then simplify; then thermos review) committing after each, open a PR with a mandatory "How to test" section, move the issue to In Review, watch its CI to green, then — only after you confirm the PR is merged — move the issue to Done and delete the local (and any leftover remote) feature branch so no stale branch remains. Use when the user runs /do-task [ISSUE] or says "do task", "do the next task", or "do ABC-12".
 disable-model-invocation: true
 ---
 
@@ -35,6 +35,26 @@ Two rules make this safe, and they are not optional:
 - **Subagents stay inside their file domain.** The parallel passes in Step 7 run concurrently
   against one working tree, so their domains are carved to not overlap. Anything an agent wants to
   change outside its own domain it **reports** rather than edits, and the main thread applies it.
+
+## Follow-ups — size them first; XS gets done now, not filed
+
+Anything that surfaces mid-task and isn't part of the issue's acceptance criteria is a
+**follow-up**: an out-of-domain item a Step 7 subagent reported, a deferred thermos finding, a
+cleanup you spotted, a suggestion you'd otherwise mention in the PR. Before filing anything,
+**shirt-size it** on the same scale `review-task` uses (`XS=1, S=2, M=3, L=4, XL=5`):
+
+- **XS** (trivial, well-understood, <½ day — copy tweak, config, one-liner) → **do not create a
+  Linear ticket.** Just do it as part of the current ticket, in the current branch, and list it in
+  the PR body under what changed so the reviewer sees it wasn't in the original scope. Applies
+  wherever a follow-up appears — including P2/P3 thermos findings that are XS-sized: fix them
+  rather than deferring them.
+- **S or larger** → create the Linear ticket as usual (tell the user too, and add the
+  **`Ready to play`** label when it already has a clear description, acceptance criteria, and
+  enough context to start).
+
+If sizing is genuinely borderline between XS and S, file the ticket — the rule exists to avoid
+ticket noise for one-liners, not to smuggle real work into an unrelated PR. Never let an XS
+follow-up expand into a redesign; if it grows while you're doing it, stop, revert it, and file it.
 
 ## Prerequisites
 Linear MCP tools (`mcp__claude_ai_Linear__*`) must be available. If not, tell the user to connect
@@ -247,7 +267,9 @@ the PR comment:
 - Fix **P2** findings that are easy; leave the rest noted.
 - Do any **easy cleanups** the review surfaces while you're in there.
 - Whatever is **left** (deferred P2s, P3s) is recorded and posted as a PR comment when the PR is
-  opened (Step 11) — nothing is dropped silently.
+  opened (Step 11) — nothing is dropped silently. Before deferring one, apply the **Follow-ups**
+  rule above: size it, and if it's **XS**, fix it here instead of deferring or ticketing it.
+  Deferred findings that are **S or larger** get a Linear ticket.
 - Re-run the **Step 5 gates** after fixing, then commit (`fix: address thermos findings
   (<identifier>)`, same footer). If there was nothing to fix, skip the commit.
 
@@ -276,9 +298,18 @@ fixing, say so and skip the commit.
    that reference the identifier). End the PR body with:
    `🤖 Generated with [Claude Code](https://claude.com/claude-code)`
 
-   **The `## How to test` section is required — never omit it.** Write it *for the user*, as
-   concrete numbered steps they can follow to verify the change by hand, not a description of the
-   automated tests. Cover, as they apply to this change:
+   **The `## How to test` section is required — never omit it, under any circumstances.** It
+   appears in every PR this skill opens, even when the change is invisible to a user (docs-only, a
+   config bump, an internal refactor, a test-only change). If there is genuinely nothing to
+   exercise by hand, still write the heading and **explain why** in a sentence or two — name what
+   the change touches, why it has no user-observable behavior, and what *does* cover it instead
+   (e.g. "docs-only — nothing to run; verify by reading the updated `README.md` section", or
+   "internal refactor with no behavior change — covered by `pnpm test`, which must stay green").
+   An empty, omitted, or "N/A" section is not acceptable; a short explained one is.
+
+   When there *is* something to exercise, write it *for the user*, as concrete numbered steps they
+   can follow to verify the change by hand, not a description of the automated tests. Cover, as
+   they apply to this change:
    - **Setup** — any prerequisite to exercise it (branch checkout, `pnpm install`, env vars,
      `pnpm --filter web db:migrate`/seed, which dev server to start and how — `pnpm dev`,
      `pnpm mobile`, etc.).
@@ -331,20 +362,33 @@ Only run this once the user confirms the **PR is merged**.
    (`state: "Done"`). Post a closing comment (`save_comment`) linking the merged PR. Leave the
    `"Ready to play"` label as-is — the `Done` status is the source of truth for completion.
 
-## Step 14 — (When the user says the PR merged) Clean up the workspace
-Done alongside Step 13, after the PR merged.
+## Step 14 — (When the user says the PR merged) Delete the local branch & clean up
+Done alongside Step 13, after the PR merged. **Deleting the local feature branch is mandatory** —
+never leave a stale merged branch behind in the main checkout.
 
-- **Worktree case**: remove the worktree and delete its folder, then delete the now-merged local
-  feature branch:
-  ```
-  git -C <main-repo> worktree remove ../<repo>-worktrees/<identifier-lower>-slug
-  git -C <main-repo> branch -d <feature-branch>
-  ```
-  (Use `git worktree remove --force` only if it refuses due to leftover untracked files — e.g. the
-  copied env files — and call that out.) GitHub usually deletes the remote branch on merge; if it
-  didn't, `git -C <main-repo> push origin --delete <feature-branch>`.
-- **Local-branch case**: you're already back on `main` from Step 13; just delete the merged feature
-  branch: `git -C <main-repo> branch -d <feature-branch>`.
+1. **Worktree case only** — remove the worktree first (a branch checked out in a worktree cannot be
+   deleted):
+   ```
+   git -C <main-repo> worktree remove ../<repo>-worktrees/<identifier-lower>-slug
+   ```
+   Use `git worktree remove --force` only if it refuses due to leftover untracked files (e.g. the
+   copied env files), and call that out.
+2. **Delete the local feature branch** (both cases — you're already back on `main` from Step 13):
+   ```
+   git -C <main-repo> branch -d <feature-branch>
+   ```
+   If `-d` refuses with *"not fully merged"* — normal after a squash or rebase merge, since the
+   branch's commits don't exist verbatim on `main` — **first confirm the PR really is merged**
+   (`gh pr view <url> --json state,mergedAt`), then force-delete: `git -C <main-repo> branch -D
+   <feature-branch>`. Only ever force-delete a branch whose PR `gh` reports as `MERGED`; if it
+   isn't merged, stop and tell the user instead of destroying unmerged work.
+3. **Prune the remote-tracking ref**: `git -C <main-repo> fetch --prune origin`. GitHub usually
+   deletes the remote branch on merge; if `git ls-remote --heads origin <feature-branch>` still
+   shows it, delete it too: `git -C <main-repo> push origin --delete <feature-branch>`.
+4. **Verify nothing stale is left**: `git -C <main-repo> branch --list <feature-branch>` must come
+   back empty, and `git -C <main-repo> worktree list` must show only the main checkout (worktree
+   case). If either still shows the task's leftovers, say so explicitly rather than reporting a
+   clean cleanup.
 
-Finally, report to the user: the Linear issue is `Done`, the merged PR link, and that the workspace
-was cleaned up.
+Finally, report to the user: the Linear issue is `Done`, the merged PR link, and that the local
+branch (name it) was deleted and the workspace cleaned up.
