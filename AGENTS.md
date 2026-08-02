@@ -129,7 +129,7 @@ module.exports = router;
 
 ```jsx
 import { useState } from 'react'
-import { Link } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import UrlInput from './components/UrlInput'
 import './App.css'
 ```
@@ -203,7 +203,7 @@ Linting and formatting are configured in the root `biome.json`:
 ### Key Frontend Dependencies
 - React 19, Vite 8
 - Axios (HTTP client)
-- lucide-react (icons)
+- Material Symbols via Google Fonts (icons — ligature `<span>`s, always `aria-hidden`; see CLAUDE.md's styling section)
 
 ### Key Backend Dependencies
 - Express 4

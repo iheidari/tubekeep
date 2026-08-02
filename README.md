@@ -48,7 +48,7 @@ tubekeep/
 - **Vite 5+** - Build tool and dev server
 - **React 18** - UI library
 - **Axios** - HTTP client (for info fetch)
-- **lucide-react** - Icon library
+- **Material Symbols** (Google Fonts) - Icon library, rendered as ligature text in a `<span class="material-symbols-outlined">`
 - **CSS Modules** - Component styling
 
 ## Features
