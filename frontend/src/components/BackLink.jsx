@@ -7,7 +7,9 @@ function BackLink({ to = '/', label = 'Back' }) {
       to={to}
       className="inline-flex items-center gap-1.5 text-muted hover:text-ink font-semibold text-[13px] mb-stack-md transition-colors"
     >
-      <span className="material-symbols-outlined text-[18px]">arrow_back</span>
+      <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+        arrow_back
+      </span>
       {label}
     </Link>
   )

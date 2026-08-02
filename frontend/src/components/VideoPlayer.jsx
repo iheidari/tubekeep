@@ -62,7 +62,9 @@ function VideoPlayer({ download, apiUrl }) {
               </h1>
               {download.createdAt ? (
                 <p className="text-muted flex items-center gap-2 text-[13px]">
-                  <span className="material-symbols-outlined text-[16px]">calendar_today</span>
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                    calendar_today
+                  </span>
                   Downloaded {formatDate(download.createdAt)}
                 </p>
               ) : null}
@@ -90,7 +92,7 @@ function VideoPlayer({ download, apiUrl }) {
               onClick={share}
               className="flex items-center gap-2 bg-fill text-on-fill rounded-[10px] font-semibold text-[14px] hover:opacity-90 active:scale-95 transition-all py-3 px-5"
             >
-              <span className="material-symbols-outlined text-[19px]">
+              <span className="material-symbols-outlined text-[19px]" aria-hidden="true">
                 {copied ? 'check' : 'ios_share'}
               </span>
               {copied ? 'Link copied' : 'Share'}
@@ -101,7 +103,9 @@ function VideoPlayer({ download, apiUrl }) {
               download={download.filename}
               className="flex items-center gap-2 bg-surface text-ink border border-line2 rounded-[10px] font-semibold text-[14px] hover:bg-tint active:scale-95 transition-all py-3 px-5"
             >
-              <span className="material-symbols-outlined text-[19px]">download</span>
+              <span className="material-symbols-outlined text-[19px]" aria-hidden="true">
+                download
+              </span>
               Save file
             </a>
 
@@ -119,7 +123,9 @@ function VideoPlayer({ download, apiUrl }) {
                 onClick={handleDelete}
                 className="flex items-center gap-2 bg-transparent text-pop rounded-[10px] font-semibold text-[14px] hover:bg-pop/5 active:scale-95 transition-all py-3 px-4 ml-auto"
               >
-                <span className="material-symbols-outlined text-[19px]">delete</span>
+                <span className="material-symbols-outlined text-[19px]" aria-hidden="true">
+                  delete
+                </span>
                 Delete
               </button>
             )}

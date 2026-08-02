@@ -43,6 +43,7 @@ function PlayerDock() {
           type="button"
           onClick={expand}
           title="Expand player"
+          aria-label="Expand player"
           className="relative w-[72px] h-[42px] shrink-0 rounded-md overflow-hidden bg-black"
         >
           <div ref={thumbRef} className="absolute inset-0" />
@@ -50,6 +51,7 @@ function PlayerDock() {
             <span
               className="material-symbols-outlined absolute inset-0 flex items-center justify-center text-primary-fixed-dim text-[24px] bg-gradient-to-br from-surface-container-high to-black"
               style={{ fontVariationSettings: "'FILL' 1" }}
+              aria-hidden="true"
             >
               music_note
             </span>
@@ -60,9 +62,14 @@ function PlayerDock() {
           type="button"
           onClick={togglePlay}
           title={isPlaying ? 'Pause' : 'Play'}
+          aria-label={isPlaying ? 'Pause' : 'Play'}
           className="shrink-0 w-10 h-10 flex items-center justify-center rounded-full bg-primary text-on-primary hover:bg-primary-container transition-colors active:scale-95"
         >
-          <span className="material-symbols-outlined" style={{ fontVariationSettings: "'FILL' 1" }}>
+          <span
+            className="material-symbols-outlined"
+            style={{ fontVariationSettings: "'FILL' 1" }}
+            aria-hidden="true"
+          >
             {isPlaying ? 'pause' : 'play_arrow'}
           </span>
         </button>
@@ -100,17 +107,23 @@ function PlayerDock() {
           type="button"
           onClick={expand}
           title="Expand player"
+          aria-label="Expand player"
           className="hidden sm:flex shrink-0 w-9 h-9 items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container-highest transition-colors"
         >
-          <span className="material-symbols-outlined">open_in_full</span>
+          <span className="material-symbols-outlined" aria-hidden="true">
+            open_in_full
+          </span>
         </button>
         <button
           type="button"
           onClick={closePlayer}
           title="Close player"
+          aria-label="Close player"
           className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full text-on-surface-variant hover:bg-surface-container-highest transition-colors"
         >
-          <span className="material-symbols-outlined">close</span>
+          <span className="material-symbols-outlined" aria-hidden="true">
+            close
+          </span>
         </button>
       </div>
     </div>

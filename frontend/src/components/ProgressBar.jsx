@@ -14,7 +14,7 @@ function ProgressBar({ progress, title, thumbnail, type, onCancel }) {
             {thumbnail ? (
               <img src={thumbnail} alt="" className="w-full h-full object-cover" />
             ) : (
-              <span className="material-symbols-outlined text-faint text-[28px]">
+              <span className="material-symbols-outlined text-faint text-[28px]" aria-hidden="true">
                 {isAudio ? 'music_note' : 'movie'}
               </span>
             )}
@@ -30,7 +30,9 @@ function ProgressBar({ progress, title, thumbnail, type, onCancel }) {
         <div className="flex flex-col gap-3">
           <div className="flex items-baseline justify-between">
             <span className="flex items-center gap-2 font-semibold text-[13.5px] text-muted">
-              <span className="material-symbols-outlined text-[18px] text-pop">downloading</span>
+              <span className="material-symbols-outlined text-[18px] text-pop" aria-hidden="true">
+                downloading
+              </span>
               Downloading…
             </span>
             <span className="font-bold text-[30px] leading-none tracking-[-0.02em] text-ink tabular-nums">
