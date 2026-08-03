@@ -71,7 +71,19 @@ npm run format    # biome format --write .
 npm run check     # biome check --write .  (safe lint fixes + formatting)
 ```
 
-**Note:** No test framework is currently configured in this project.
+### Tests
+
+Two suites, both hermetic (no network, no database, no `yt-dlp`) and both gating every PR:
+
+```bash
+cd backend && npm test    # node:test, *.test.js colocated with the source
+cd frontend && npm test   # Playwright a11y smoke suite (test/a11y/*.spec.js)
+```
+
+The frontend suite needs a browser once per clone: `cd frontend && npm run test:install`. It is a
+deliberately small rendered-page regression net — focus-ring visibility and the `aria-disabled` +
+`aria-describedby` convention — not a component-unit-testing setup. See CLAUDE.md → *Commands* for
+what it covers and why it's shaped that way.
 
 ## Code Style Guidelines
 

@@ -361,6 +361,19 @@ cd frontend
 npm run build  # Creates dist/ folder
 ```
 
+### Tests
+```bash
+cd backend  && npm test         # node:test unit + integration suite
+cd frontend && npm test         # Playwright a11y smoke suite (rendered pages)
+cd frontend && npm run test:install  # one-time: fetch the browser
+```
+
+Both suites are hermetic — no network, database, or `yt-dlp` needed — and both run on every PR
+(`.github/workflows/ci.yml`). The frontend suite is a small rendered-page regression net for the
+things lint and `vite build` structurally can't see: focus-ring visibility (a CSS specificity
+conflict once shipped it invisible on every text input) and the `aria-disabled` +
+`aria-describedby` convention.
+
 ## Security Considerations
 
 - Downloads are stored temporarily and auto-deleted

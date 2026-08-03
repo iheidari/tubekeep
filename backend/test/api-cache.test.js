@@ -13,33 +13,25 @@
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
-const { spawn } = require('node:child_process');
-const path = require('node:path');
 
-const PORT = 3990;
-const base = `http://localhost:${PORT}`;
+const { spawnServer, scratchCwd, removeScratchCwd } = require('./helpers/spawnServer');
+
 let server;
+let base;
+let tmpDir;
 
 before(async () => {
-  server = spawn('node', [path.join(__dirname, '..', 'src', 'server.js')], {
-    env: { ...process.env, PORT: String(PORT), NODE_ENV: 'test' },
-    stdio: 'ignore',
-  });
-  // Poll /health until the server is listening.
-  for (let i = 0; i < 50; i++) {
-    try {
-      const res = await fetch(`${base}/health`);
-      if (res.ok) return;
-    } catch {
-      // not up yet
-    }
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  throw new Error('Test server did not start in time');
+  // Nothing here depends on DATABASE_URL/FRONTEND_URL either way, but booting
+  // in a scratch cwd keeps this file from reading a developer's real
+  // backend/.env — see scratchCwd. The port is the helper's (0XC-275), so this
+  // can't collide with the other spawn-based files it runs in parallel with.
+  tmpDir = scratchCwd('tk-api-cache-');
+  ({ server, base } = await spawnServer({ cwd: tmpDir, env: { DATABASE_URL: undefined } }));
 });
 
 after(() => {
   if (server) server.kill('SIGKILL');
+  removeScratchCwd(tmpDir);
 });
 
 // Probe `/api/auth/me`: a public, always-present `/api` route (returns 401 with
