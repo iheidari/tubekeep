@@ -18,14 +18,11 @@
 
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
-const { spawn } = require('node:child_process');
-const fs = require('node:fs');
-const os = require('node:os');
-const path = require('node:path');
 
-const PORT = 3993;
-const base = `http://localhost:${PORT}`;
+const { spawnServer, scratchCwd, removeScratchCwd } = require('./helpers/spawnServer');
+
 let server;
+let base;
 let tmpDir;
 
 async function requestAs(ip, extraHeaders = {}) {
@@ -52,40 +49,23 @@ async function fireN(count, ip, extraHeaders = {}) {
 }
 
 before(async () => {
-  // Scratch cwd with an explicit empty .env so DATABASE_URL/FRONTEND_URL can
-  // ONLY come from the spawn env, never a real backend/.env on this machine
-  // (same isolation as cors-env.test.js / schema-boot.test.js). No DB is
-  // needed: /api/auth/request's store call is wrapped in try/catch and still
-  // answers its generic 200 on failure (see routes/auth.js), and the rate
+  // No DB is needed: /api/auth/request's store call is wrapped in try/catch and
+  // still answers its generic 200 on failure (see routes/auth.js), and the rate
   // limiter runs ahead of that DB call regardless.
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tk-ratelimit-proxy-'));
-  fs.writeFileSync(path.join(tmpDir, '.env'), '');
-
-  const env = { ...process.env, PORT: String(PORT), NODE_ENV: 'test' };
-  delete env.DATABASE_URL;
-  delete env.FRONTEND_URL;
-
-  server = spawn('node', [path.join(__dirname, '..', 'src', 'server.js')], {
+  //
+  // The port comes from the helper (0XC-275) rather than being hand-picked —
+  // ipv6-boot.test.js was written on this file's old 3993 and the two raced
+  // for the bind, caught in PR #33's review rather than on main.
+  tmpDir = scratchCwd('tk-ratelimit-proxy-');
+  ({ server, base } = await spawnServer({
     cwd: tmpDir,
-    env,
-    stdio: 'ignore',
-  });
-
-  for (let i = 0; i < 50; i++) {
-    try {
-      const res = await fetch(`${base}/health`);
-      if (res.ok) return;
-    } catch {
-      // not up yet
-    }
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  throw new Error('Test server did not start in time');
+    env: { DATABASE_URL: undefined, FRONTEND_URL: undefined },
+  }));
 });
 
 after(() => {
   if (server) server.kill('SIGKILL');
-  if (tmpDir) fs.rmSync(tmpDir, { recursive: true, force: true });
+  removeScratchCwd(tmpDir);
 });
 
 test('the real server buckets by X-Forwarded-For client, not one shared IP (trust proxy wired end-to-end)', async () => {
