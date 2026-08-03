@@ -36,6 +36,18 @@ const PROVIDERS = {
     viteClientId: 'VITE_GOOGLE_CLIENT_ID',
     viteRedirect: 'VITE_GOOGLE_REDIRECT_URI',
   },
+  onedrive: {
+    label: 'OneDrive',
+    icon: 'cloud_circle',
+    authEndpoint: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
+    // offline_access is required to receive a refresh token; the `common`
+    // authority accepts both personal (MSA) and work/school (Entra ID) accounts.
+    scopes: 'Files.ReadWrite.AppFolder offline_access',
+    authParams: { response_mode: 'query' },
+    configKey: 'clientId',
+    viteClientId: 'VITE_MS_CLIENT_ID',
+    viteRedirect: 'VITE_MS_REDIRECT_URI',
+  },
 }
 
 // Refresh a little before an access token actually expires.

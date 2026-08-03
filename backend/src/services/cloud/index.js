@@ -5,10 +5,12 @@
 
 const dropbox = require('./dropbox');
 const googledrive = require('./googledrive');
+const onedrive = require('./onedrive');
 
 const PROVIDERS = {
   dropbox,
   googledrive,
+  onedrive,
 };
 
 function getProvider(name) {

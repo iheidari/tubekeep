@@ -4,3 +4,7 @@ downloads/
 .env
 .DS_Store
 dist/
+
+# Playwright (frontend a11y suite)
+test-results/
+playwright-report/
