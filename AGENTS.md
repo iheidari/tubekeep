@@ -12,6 +12,7 @@ This is a full-stack YouTube video downloader application with a React frontend 
 │   │   └── components/   # React components
 │   └── package.json
 ├── biome.json         # Biome lint + format config (whole repo)
+├── package.json       # tooling host only — Biome + nodemon, no runtime deps (see CLAUDE.md)
 ├── backend/           # Express API server (port 3001)
 │   ├── src/
 │   │   ├── server.js
