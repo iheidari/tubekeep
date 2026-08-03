@@ -29,6 +29,8 @@ const { applySchema } = require('./dbInit');
 const { startCleanupScheduler } = require('./services/cleanup');
 const { downloadsDir } = require('./utils/storage');
 const { rateLimit } = require('./utils/rateLimit');
+const { decideForceIpv4 } = require('./services/ipv6');
+const { setForceIpv4 } = require('./services/ytdlp');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -232,7 +234,30 @@ async function ensureSchema() {
   }
 }
 
-ensureSchema().then(() => {
+// Resolve, once at boot, whether yt-dlp calls should force IPv4 (services/ipv6.js):
+// an explicit YTDLP_FORCE_IPV4 wins outright; otherwise a short, timeout-bounded
+// probe auto-detects a black-holed IPv6 route (the ~85s-per-call stall this
+// replaces manual diagnosis for, 0XC-126) and enables it. Skipped in the test
+// suite, which must reach no real network — the same reasoning as ensureSchema's
+// DATABASE_URL skip above, just keyed on NODE_ENV since there's no env var whose
+// mere presence signals "network available" the way DATABASE_URL does for Postgres.
+// This is a best-effort convenience, never a boot requirement — decideForceIpv4
+// already falls back to `false` internally rather than rejecting, but this
+// try/catch matches ensureSchema's defensive shape above in case that ever
+// changes, so a network hiccup here can never be what stops the server from
+// starting.
+async function ensureIpv4Decision() {
+  try {
+    const forceIpv4 = await decideForceIpv4({ skipProbe: process.env.NODE_ENV === 'test' });
+    setForceIpv4(forceIpv4);
+  } catch (err) {
+    console.warn(
+      `⚠️  IPv6 probe boot step failed unexpectedly (${err.message}) — leaving IPv4 unforced.`,
+    );
+  }
+}
+
+Promise.all([ensureSchema(), ensureIpv4Decision()]).then(() => {
   startCleanupScheduler({ store: downloadsStore });
 
   app.listen(PORT, () => {

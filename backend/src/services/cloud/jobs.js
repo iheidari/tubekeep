@@ -1,6 +1,6 @@
 const { EventEmitter } = require('node:events');
 const { v4: uuidv4 } = require('uuid');
-const { getDownload, getDownloadFilePath, markMoved } = require('../../utils/storage');
+const { getDownloadDir, getDownloadFilePath, markMoved, hasMedia } = require('../../utils/storage');
 const { getProvider } = require('./index');
 const fs = require('node:fs');
 
@@ -63,8 +63,8 @@ async function run(job) {
     return;
   }
 
-  const record = getDownload(job.downloadId);
-  if (!record || record.expired || !record.files || record.files.length === 0) {
+  const record = getDownloadDir(job.downloadId);
+  if (!hasMedia(record)) {
     fail(job, 'notfound', 'This file is no longer available to move');
     return;
   }
@@ -73,14 +73,15 @@ async function run(job) {
   emit(job);
 
   try {
-    // Move every non-metadata file (today one media file, but future-proofed
-    // for subtitles/thumbnails). Aggregate progress is weighted by byte size.
+    // Move every file in the directory (today one media file, but
+    // future-proofed for subtitles/thumbnails). Aggregate progress is
+    // weighted by byte size.
     const files = record.files
       .map((name) => ({ name, filePath: getDownloadFilePath(job.downloadId, name) }))
       .filter((f) => f.filePath);
-    // The files can vanish between the getDownload check above and here if the
-    // cleanup scheduler expires the download in that window. Bail instead of
-    // falling through to deleteDownload + "complete" with nothing uploaded.
+    // The files can vanish between the getDownloadDir check above and here if
+    // the cleanup scheduler expires the download in that window. Bail instead
+    // of falling through to deleteDownload + "complete" with nothing uploaded.
     if (files.length === 0) {
       fail(job, 'notfound', 'This file is no longer available to move');
       return;
@@ -106,11 +107,12 @@ async function run(job) {
       uploadedBefore += sizes[i];
     }
 
-    // Confirmed upload → drop the local media but KEEP the metadata row (with
-    // its source URL + cloud link) so the download stays re-downloadable from
-    // source and openable in the visitor's cloud, on any device.
+    // Confirmed upload → drop the local media. The `downloads` row (updated
+    // below) is the lifecycle record now: it keeps its source URL + cloud link
+    // so the download stays re-downloadable from source and openable in the
+    // visitor's cloud, on any device.
     const result = { provider: provider.name, ...last };
-    markMoved(job.downloadId, result);
+    markMoved(job.downloadId);
     // Mirror it into the per-user history row: a moved download keeps its card
     // (source URL + cloud link) but stops counting toward the owner's quota,
     // since its bytes now live in the visitor's cloud, not ours. Best-effort —

@@ -54,6 +54,19 @@ export function mediaKind(download) {
   return isAudioFile(download?.filename) ? 'audio' : 'video'
 }
 
+// Do two records point at the same source video? Canonical extractor id when
+// BOTH sides carry one, else exact URL equality (0XC-117). This is the client
+// half of the rule the server writes in `sharesSource` / `SUPERSEDABLE_SQL`
+// (downloadsStore.js) — it lives here rather than in either caller because two
+// screens now need it: HistoryContext's post-completion supersede mirror, and
+// InfoPage's "you already have this" warning, which asks the same question
+// BEFORE a download starts. Keep it in step with the server's version.
+export function sharesSource(a, b) {
+  if (!a || !b) return false
+  if (a.sourceKey && b.sourceKey) return a.sourceKey === b.sourceKey
+  return !!a.url && a.url === b.url
+}
+
 // mm:ss formatter shared by the format list and the player dock.
 export function formatDuration(seconds, fallback = '') {
   if (!Number.isFinite(seconds) || seconds < 0) return fallback

@@ -253,3 +253,78 @@ test('superseding frees the old row’s quota', async () => {
   // Only the fresh download's real on-disk size remains.
   assert.equal(await store.usageForUser(USER), 4242);
 });
+
+// --- 0XC-117: supersede by canonical video identity, not just the raw URL ---
+
+test('a completed re-download with a matching sourceKey supersedes an old row pasted as a different URL form', async () => {
+  await seedAt('old', USER, SRC, { source_key: 'youtube:abc' });
+
+  const res = await start({
+    url: 'https://youtu.be/abc?si=xyz',
+    filesize: 10 * MB,
+    sourceKey: 'youtube:abc',
+  });
+  assert.equal(res.status, 200);
+  await finish(started[0]);
+
+  const ids = (await store.listByUser(USER)).map((r) => r.downloadId);
+  assert.equal(ids.length, 1);
+  assert.notEqual(ids[0], 'old');
+});
+
+test('an invalid sourceKey is dropped rather than rejecting the download', async () => {
+  const res = await start({ url: SRC, filesize: 10 * MB, sourceKey: 'x'.repeat(500) });
+  assert.equal(res.status, 200);
+
+  const { downloadId } = (await res.json()).data;
+  assert.equal((await store.findForUser(downloadId, USER)).sourceKey, null);
+});
+
+// isValidSourceKey isn't exported — it's exercised the same way as the rest of
+// this route, through the public contract: POST, then read back what actually
+// landed on the row. Each case below is a distinct reason `isValidSourceKey`
+// can reject a value, so a regression in any one of its checks shows up here.
+
+async function sourceKeyAfter(sourceKey) {
+  const res = await start({ url: SRC, filesize: 10 * MB, sourceKey });
+  assert.equal(res.status, 200, 'a rejected sourceKey must still let the download start');
+  const { downloadId } = (await res.json()).data;
+  return (await store.findForUser(downloadId, USER)).sourceKey;
+}
+
+test('an empty-string sourceKey is dropped', async () => {
+  assert.equal(await sourceKeyAfter(''), null);
+});
+
+test('a non-string sourceKey is dropped', async () => {
+  assert.equal(await sourceKeyAfter(12345), null);
+});
+
+test('a sourceKey containing a newline is dropped', async () => {
+  assert.equal(await sourceKeyAfter('youtube:abc\nX-Injected: true'), null);
+  assert.equal(await sourceKeyAfter('youtube:abc\r\nX-Injected: true'), null);
+});
+
+// Postgres `text` rejects an embedded NUL outright — without this check the
+// value would clear isValidSourceKey only to fail later at store.insert's
+// query, turning into a 500 that rejects the whole download instead of just
+// falling back to url-based matching as documented.
+test('a sourceKey containing a NUL byte is dropped', async () => {
+  assert.equal(await sourceKeyAfter(`youtube:abc${String.fromCharCode(0)}`), null);
+});
+
+test('a sourceKey containing a tab or other control character is dropped', async () => {
+  assert.equal(await sourceKeyAfter('youtube:abc\tdef'), null);
+});
+
+test('a sourceKey exactly at the length limit is kept', async () => {
+  const key = `youtube:${'a'.repeat(192)}`; // 200 chars total
+  assert.equal(key.length, 200);
+  assert.equal(await sourceKeyAfter(key), key);
+});
+
+test('a sourceKey one character over the length limit is dropped', async () => {
+  const key = `youtube:${'a'.repeat(193)}`; // 201 chars total
+  assert.equal(key.length, 201);
+  assert.equal(await sourceKeyAfter(key), null);
+});

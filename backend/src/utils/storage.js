@@ -6,7 +6,6 @@ const fs = require('node:fs');
 const downloadsDir = path.resolve(
   process.env.DOWNLOADS_DIR || path.join(__dirname, '../../downloads'),
 );
-const METADATA_FILE = 'metadata.json';
 
 // downloadIds are server-minted UUIDs. Anything else in a route param is an
 // injection attempt — reject it before it ever reaches path.join / fs.
@@ -25,62 +24,39 @@ function resolveWithin(base, ...segments) {
   return target;
 }
 
-let tmpCounter = 0;
-
-function getMetadataPath(downloadId) {
-  return path.join(downloadsDir, downloadId, METADATA_FILE);
-}
-
-function saveDownloadMetadata(downloadId, metadata) {
-  if (!isValidDownloadId(downloadId)) return;
-  const metadataPath = getMetadataPath(downloadId);
-  // Write to a temp file and rename so a crash mid-write can't leave a
-  // half-written metadata.json that breaks JSON.parse for the whole listing.
-  const tmpPath = `${metadataPath}.${process.pid}.${tmpCounter++}.tmp`;
-  fs.writeFileSync(tmpPath, JSON.stringify(metadata, null, 2));
-  fs.renameSync(tmpPath, metadataPath);
-}
-
-function getDownloadMetadata(downloadId) {
+// Filesystem-only view of one download directory: its files and how recently
+// the directory was touched (a write bumps mtime, which is what the age-based
+// sweep uses in place of a stored `createdAt`). The `downloads` row — not this
+// — is the source of truth for everything else (title, status, kept, …).
+// Returns null if the id is invalid or the directory can't be read.
+function getDownloadDir(downloadId) {
   if (!isValidDownloadId(downloadId)) return null;
-  const metadataPath = getMetadataPath(downloadId);
-  try {
-    if (fs.existsSync(metadataPath)) {
-      return JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
-    }
-  } catch (err) {
-    console.error(`⚠️  Corrupt metadata for ${downloadId}: ${err.message}`);
-  }
-  return null;
-}
-
-// Build the listing row for a single download: metadata + its media files, with
-// `expired` derived from having no media files left. Returns null if the id is
-// invalid, has no/corrupt metadata, or its directory can't be read — so callers
-// (and listDownloads) can skip it without a corrupt row breaking the listing.
-function getDownload(downloadId) {
-  const metadata = getDownloadMetadata(downloadId);
-  if (!metadata) return null;
-
   const dirPath = path.join(downloadsDir, downloadId);
   let files;
+  let mtimeMs;
   try {
-    files = fs.readdirSync(dirPath).filter((f) => f !== METADATA_FILE);
+    files = fs.readdirSync(dirPath);
+    mtimeMs = fs.statSync(dirPath).mtimeMs;
   } catch (err) {
     console.error(`⚠️  Skipping unreadable download ${downloadId}: ${err.message}`);
     return null;
   }
-
-  return {
-    downloadId,
-    ...metadata,
-    files,
-    expired: files.length === 0,
-    path: dirPath,
-  };
+  return { downloadId, files, mtimeMs };
 }
 
-function listDownloads() {
+// True when a `getDownloadDir`/`listDownloadDirs` entry still has media to
+// serve or move. An empty directory (drained by a prior expire/move, or never
+// written to) has nothing left to reclaim or upload — the one "does this
+// download still have files" check, shared by the age-based sweep and the
+// move-to-cloud job instead of each re-deriving it from `.files.length`.
+function hasMedia(dir) {
+  return !!dir && dir.files.length > 0;
+}
+
+// Every download directory on disk — the raw material the cleanup sweep walks.
+// Ordering doesn't matter here (unlike the old metadata-backed listing, nothing
+// renders this directly); callers derive whatever order they need.
+function listDownloadDirs() {
   let entries;
   try {
     entries = fs.readdirSync(downloadsDir, { withFileTypes: true });
@@ -88,14 +64,13 @@ function listDownloads() {
     return [];
   }
 
-  const downloads = [];
+  const dirs = [];
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const download = getDownload(entry.name);
-    if (download) downloads.push(download);
+    if (!entry.isDirectory() || !isValidDownloadId(entry.name)) continue;
+    const dir = getDownloadDir(entry.name);
+    if (dir) dirs.push(dir);
   }
-
-  return downloads.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  return dirs;
 }
 
 function getDownloadFilePath(downloadId, filename) {
@@ -125,12 +100,12 @@ function getDownloadFilePath(downloadId, filename) {
   return null;
 }
 
-// Actual on-disk byte size of a download's declared result file, or null if
-// it's missing (metadata names a file that isn't actually there — e.g. a
-// partial download). Reuses getDownloadFilePath's validation/traversal guard,
-// so callers get the same "confirmed to exist as a file" contract. Used by the
-// cleanup reconcile (see cleanup.js) to trust the real file over a stale or
-// client-estimated size.
+// Actual on-disk byte size of one of a download's files, or null if it isn't
+// actually there (e.g. it vanished between a directory listing and this call).
+// Reuses getDownloadFilePath's validation/traversal guard, so callers get the
+// same "confirmed to exist as a file" contract. Used by the cleanup reconcile
+// (see cleanup.js) to trust the real file over a stale or client-estimated
+// size.
 function getDownloadFileSize(downloadId, filename) {
   const filePath = getDownloadFilePath(downloadId, filename);
   if (!filePath) return null;
@@ -223,109 +198,51 @@ function hasQuotaFor(used, max, filesize) {
   return Number(used || 0) + Number(filesize) <= Number(max);
 }
 
-function setKept(downloadId, kept) {
-  const metadata = getDownloadMetadata(downloadId);
-  if (!metadata) return false;
-  metadata.kept = !!kept;
-  saveDownloadMetadata(downloadId, metadata);
-  return true;
-}
-
-// Drop a download's media files but KEEP metadata.json, then merge `patch` into
-// the metadata. This is the shared mechanism behind both lifecycle transitions
-// that retire media without hard-deleting the row: "expired" (aged out) and
-// "moved" (uploaded to the visitor's cloud). The row lives on — re-downloadable
-// from source — instead of the whole directory being removed by deleteDownload.
-function dropMediaAndPatch(downloadId, patch) {
-  if (!isValidDownloadId(downloadId)) return false;
-  const dirPath = path.join(downloadsDir, downloadId);
-  if (!fs.existsSync(dirPath)) return false;
-
-  const files = fs.readdirSync(dirPath).filter((f) => f !== METADATA_FILE);
-  for (const file of files) {
-    fs.rmSync(path.join(dirPath, file), { force: true, recursive: true });
-  }
-
-  const metadata = getDownloadMetadata(downloadId);
-  if (metadata) {
-    saveDownloadMetadata(downloadId, { ...metadata, ...patch });
-  }
-  return true;
-}
-
+// Expire and move-to-cloud both retire a download's *local* media while the
+// `downloads` row (the single lifecycle record) lives on — re-downloadable
+// from source, or openable in the visitor's cloud. With no on-disk record left
+// to preserve, both are just "the directory is gone"; kept as two named
+// exports because the call sites read clearer that way, and it's cheap.
 function expireDownload(downloadId) {
-  return dropMediaAndPatch(downloadId, { expiredAt: new Date().toISOString() });
+  return deleteDownload(downloadId);
 }
 
-// Move-to-cloud lifecycle: the moved row keeps its source `url` + cloud link so
-// it stays re-downloadable from source and openable in the visitor's cloud.
-function markMoved(downloadId, moveInfo) {
-  return dropMediaAndPatch(downloadId, {
-    movedAt: new Date().toISOString(),
-    moved: moveInfo || {},
-  });
+function markMoved(downloadId) {
+  return deleteDownload(downloadId);
 }
 
-// `downloads` defaults to a fresh scan; callers that already hold a listing pass
-// it in so one sweep doesn't walk the downloads directory twice.
-// Remove download directories that carry no metadata.json and haven't been
-// touched in `maxAgeMs`. Such a directory is debris, not a download: metadata is
-// written on completion, so anything without it either died mid-flight or was
-// recreated by a yt-dlp process still flushing after its abort was requested
-// (the cancel route removes the directory synchronously, but the subprocess
-// exits asynchronously). listDownloads skips these, so the age-based sweep can
-// never reach them and they would sit on disk forever.
+// Age-based expiry over a set of on-disk directories (default: a fresh scan).
+// Age is the directory's `mtimeMs` — the closest filesystem-only stand-in for
+// "last touched" now that there's no stored `createdAt` to read. `skipIds`
+// (downloads currently `kept`, and/or actively running in *this* process —
+// see downloadManager's `runningDownloadIds`) is never touched regardless of
+// age. Everything else — which downloads exist, whether one is `kept`,
+// whether it's still running — is the caller's job to know; this function
+// only ever deletes directories.
 //
-// `maxAgeMs` must stay well past the longest plausible download: a directory's
-// mtime only changes when an entry is added or removed, so a slow single-file
-// download can look untouched the whole time it is running. Callers pass the
-// same window used to declare an in-flight download stranded.
-function cleanupOrphanDirs(maxAgeMs = 6 * 60 * 60 * 1000) {
-  let entries;
-  try {
-    entries = fs.readdirSync(downloadsDir, { withFileTypes: true });
-  } catch {
-    return { removed: 0, removedIds: [] };
-  }
-
-  const cutoff = Date.now() - maxAgeMs;
-  const removedIds = [];
-  for (const entry of entries) {
-    if (!entry.isDirectory() || !isValidDownloadId(entry.name)) continue;
-    const dirPath = path.join(downloadsDir, entry.name);
-    try {
-      if (fs.existsSync(path.join(dirPath, METADATA_FILE))) continue;
-      if (fs.statSync(dirPath).mtimeMs >= cutoff) continue;
-      fs.rmSync(dirPath, { recursive: true, force: true });
-      removedIds.push(entry.name);
-    } catch (err) {
-      console.error(`⚠️  Could not remove orphan dir ${entry.name}: ${err.message}`);
-    }
-  }
-  return { removed: removedIds.length, removedIds };
-}
-
-function cleanupOldDownloads(maxAgeHours = 24, downloads = listDownloads()) {
+// This deliberately does NOT skip empty directories: one with no files is
+// exactly what a download that died before any bytes landed looks like
+// (`ensureDownloadDir` ran, the job never got further), and reclaiming those
+// once they go stale is this function's replacement for the old, separate
+// `cleanupOrphanDirs` sweep — folded in here rather than kept as a second
+// pass, since both are now just "how old is this directory".
+function cleanupOldDownloads(maxAgeHours = 24, { downloads = listDownloadDirs(), skipIds } = {}) {
   const now = Date.now();
   const maxAgeMs = maxAgeHours * 60 * 60 * 1000;
+  const skip = skipIds || new Set();
   const expiredIds = [];
   const errors = [];
 
-  // Reuse the single directory scanner. `expired` (no media files) and `kept`
-  // downloads are already surfaced by listDownloads, so this only applies the
-  // age predicate — no separate filesystem walk to keep in sync.
-  for (const download of downloads) {
-    if (download.expired || download.kept) continue;
+  for (const dir of downloads) {
+    if (skip.has(dir.downloadId)) continue;
 
     try {
-      const createdAtMs = download.createdAt ? new Date(download.createdAt).getTime() : NaN;
-      // Missing/invalid createdAt: leave it alone rather than expiring blindly.
-      if (Number.isFinite(createdAtMs) && now - createdAtMs > maxAgeMs) {
-        expireDownload(download.downloadId);
-        expiredIds.push(download.downloadId);
+      if (now - dir.mtimeMs > maxAgeMs) {
+        expireDownload(dir.downloadId);
+        expiredIds.push(dir.downloadId);
       }
     } catch (err) {
-      errors.push({ dir: download.downloadId, error: err.message });
+      errors.push({ dir: dir.downloadId, error: err.message });
     }
   }
 
@@ -344,17 +261,14 @@ module.exports = {
   remainingQuota,
   hasQuotaFor,
   isValidDownloadId,
-  saveDownloadMetadata,
-  getDownloadMetadata,
-  getDownload,
-  listDownloads,
+  getDownloadDir,
+  listDownloadDirs,
+  hasMedia,
   getDownloadFilePath,
   getDownloadFileSize,
   ensureDownloadDir,
   deleteDownload,
   expireDownload,
   markMoved,
-  setKept,
   cleanupOldDownloads,
-  cleanupOrphanDirs,
 };

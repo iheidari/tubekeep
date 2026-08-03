@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { apiFetch, fetchDownloads, fileUrl } from '../lib/media'
+import { apiFetch, fetchDownloads, fileUrl, sharesSource } from '../lib/media'
 import { HISTORY_API_URL, HistoryContext, LEGACY_HISTORY_KEYS } from './historyContext.js'
 import { useAuth } from './useAuth.js'
 
@@ -24,15 +24,17 @@ function decorate(d) {
 const byNewest = (a, b) => new Date(b.createdAt) - new Date(a.createdAt)
 
 // Does the freshly-completed download `fresh` replace the existing row `row`?
-// One row per source URL (0XC-10). The SERVER owns this rule — it runs in the
-// download job's completion hook, so it applies even when no tab is watching the
-// SSE. This mirror exists only so the list updates instantly instead of waiting
-// for the next sync; it issues no requests. Keep the two spared cases in step
+// One row per canonical video identity (0XC-10, refined by 0XC-117). The
+// SERVER owns this rule — it runs in the download job's completion hook, so it
+// applies even when no tab is watching the SSE. This mirror exists only so the
+// list updates instantly instead of waiting for the next sync; it issues no
+// requests. The match key is `sharesSource` in lib/media.js (shared with
+// InfoPage's duplicate warning); keep it and the two spared cases here in step
 // with the store's supersedeForUser: a moved-to-cloud row still links to a live
 // cloud copy, and a `downloading` row belongs to a concurrent job.
 function supersededBy(fresh, row) {
   if (row.downloadId === fresh.downloadId) return false
-  if (!fresh.url || row.url !== fresh.url) return false
+  if (!sharesSource(fresh, row)) return false
   return !row.moved && row.status !== 'downloading'
 }
 

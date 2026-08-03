@@ -109,6 +109,15 @@ test('a moved row exposes its cloud link as `moved` so the UI renders a Moved ca
   assert.equal(await store.usageForUser(USER), 0);
 });
 
+test('keptIds returns every kept download across all users — the cleanup sweep’s exclusion set', async () => {
+  const store = createMemoryStore();
+  await seed(store, 'a', USER, 100, { kept: true });
+  await seed(store, 'b', USER, 100, { kept: false });
+  await seed(store, 'c', OTHER, 100, { kept: true });
+
+  assert.deepEqual((await store.keptIds()).sort(), ['a', 'c']);
+});
+
 test('expireMissing retires rows whose media is gone, keeping those still on disk', async () => {
   const store = createMemoryStore();
   await seed(store, 'onDisk', USER, 100);
@@ -283,4 +292,84 @@ test('supersedeForUser frees the superseded rows’ quota', async () => {
 
   await store.supersedeForUser({ downloadId: 'fresh', userId: USER, url: SRC });
   assert.equal(await store.usageForUser(USER), 100);
+});
+
+// --- supersedeForUser: canonical video identity (0XC-117) --------------------
+// A `source_key` match must win over a differing raw URL, so pasting the same
+// video in a different link form still supersedes the old row.
+
+const OTHER_FORM = 'https://youtu.be/abc?si=xyz';
+const KEY = 'youtube:abc';
+
+test('supersedeForUser matches by source_key across differing URLs', async () => {
+  const store = createMemoryStore();
+  await seedAtUrl(store, 'old', USER, SRC, { source_key: KEY });
+  await seedAtUrl(store, 'fresh', USER, OTHER_FORM, { source_key: KEY });
+
+  const gone = await store.supersedeForUser({
+    downloadId: 'fresh',
+    userId: USER,
+    url: OTHER_FORM,
+    sourceKey: KEY,
+  });
+
+  assert.deepEqual(gone, ['old']);
+});
+
+test('supersedeForUser falls back to url when the fresh row has no source_key', async () => {
+  const store = createMemoryStore();
+  await seedAtUrl(store, 'old', USER, SRC, { source_key: KEY });
+
+  const gone = await store.supersedeForUser({
+    downloadId: 'fresh',
+    userId: USER,
+    url: SRC,
+    sourceKey: null,
+  });
+
+  assert.deepEqual(gone, ['old']);
+});
+
+test('supersedeForUser falls back to url when the old row predates the column (no source_key)', async () => {
+  const store = createMemoryStore();
+  await seedAtUrl(store, 'old', USER, SRC); // no source_key — pre-migration row
+
+  const gone = await store.supersedeForUser({
+    downloadId: 'fresh',
+    userId: USER,
+    url: SRC,
+    sourceKey: KEY,
+  });
+
+  assert.deepEqual(gone, ['old']);
+});
+
+test('supersedeForUser does not match a different video, even with a similar URL', async () => {
+  const store = createMemoryStore();
+  await seedAtUrl(store, 'old', USER, SRC, { source_key: 'youtube:zzz' });
+
+  const gone = await store.supersedeForUser({
+    downloadId: 'fresh',
+    userId: USER,
+    url: SRC,
+    sourceKey: KEY,
+  });
+
+  assert.deepEqual(gone, []);
+  assert.ok(await store.findForUser('old', USER));
+});
+
+test('supersedeForUser by source_key never crosses users', async () => {
+  const store = createMemoryStore();
+  await seedAtUrl(store, 'theirs', OTHER, OTHER_FORM, { source_key: KEY });
+
+  const gone = await store.supersedeForUser({
+    downloadId: 'fresh',
+    userId: USER,
+    url: SRC,
+    sourceKey: KEY,
+  });
+
+  assert.deepEqual(gone, []);
+  assert.ok(await store.findForUser('theirs', OTHER));
 });

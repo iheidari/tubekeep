@@ -6,7 +6,6 @@ const {
   getDownloadFilePath,
   deleteDownload,
   expireDownload,
-  setKept,
 } = require('../utils/storage');
 const { cancelJob } = require('../services/downloadManager');
 const { rateLimit } = require('../utils/rateLimit');
@@ -207,9 +206,9 @@ function createFilesRouter(requireAuth, { store }) {
     }
   });
 
-  // Toggle "keep forever". The DB row is the source of truth for the UI, but the
-  // on-disk metadata is updated too because the age-based cleanup sweep reads
-  // `kept` from there when deciding what to expire.
+  // Toggle "keep forever". The `downloads` row is the only place this lives —
+  // the age-based cleanup sweep reads `kept` from the store (see
+  // services/cleanup.js), not from disk.
   router.patch('/:downloadId', async (req, res) => {
     const { downloadId } = req.params;
     const kept = req.query.kept === 'true';
@@ -218,7 +217,6 @@ function createFilesRouter(requireAuth, { store }) {
     try {
       const ok = await store.setKeptForUser(downloadId, req.user.user_id, kept);
       if (!ok) return notFound(res);
-      setKept(downloadId, kept);
       res.json({ success: true, data: { downloadId, kept } });
     } catch (error) {
       console.error('❌ Keep toggle error:', error.message);
