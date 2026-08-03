@@ -55,7 +55,7 @@ jobs:
         # Without the health gate the steps can start before Postgres accepts
         # connections, and the run fails on a race rather than on a test.
         options: >-
-          --health-cmd pg_isready
+          --health-cmd "pg_isready -U postgres -d tubekeep_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
