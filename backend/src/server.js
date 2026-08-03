@@ -260,8 +260,14 @@ async function ensureIpv4Decision() {
 Promise.all([ensureSchema(), ensureIpv4Decision()]).then(() => {
   startCleanupScheduler({ store: downloadsStore });
 
-  app.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
+  // Log the port the OS actually bound (`server.address().port`), not the one
+  // requested. They're the same for a normal `PORT=3001` start, but not for
+  // `PORT=0` — which is what the test suite uses so parallel test files can
+  // never collide on a port (0XC-275). test/helpers/spawnServer.js parses this
+  // line to learn where the child is listening, so echoing the requested value
+  // here would hand it a useless `0`.
+  const server = app.listen(PORT, () => {
+    console.log(`🚀 Server running on http://localhost:${server.address().port}`);
     console.log(`📁 Downloads directory: ${downloadsDir}`);
   });
 });
