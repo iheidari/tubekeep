@@ -34,7 +34,9 @@ function UrlInput({ onSubmit, loading }) {
 
       <form onSubmit={handleSubmit} className="w-full max-w-[680px]">
         <div className="flex items-center gap-1 bg-surface border border-line2 rounded-xl pl-5 pr-2 py-2 shadow-sm focus-within:border-ink transition-colors">
-          <span className="material-symbols-outlined text-[24px] text-faint">link</span>
+          <span className="material-symbols-outlined text-[24px] text-faint" aria-hidden="true">
+            link
+          </span>
           <input
             type="url"
             placeholder="Paste video URL"
@@ -59,17 +61,28 @@ function UrlInput({ onSubmit, loading }) {
               inactive ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-90 active:scale-[0.98]'
             }`}
           >
+            {/* The label is hidden *visually* below `sm` (sr-only), never with
+                `hidden` — a display:none label leaves the button's accessible
+                name to be computed from the icon span's ligature text
+                ("arrow_forward"). Pairing sr-only with aria-hidden on the icon
+                keeps one stable, meaningful name at every width and in both
+                states, without an aria-label overriding the visible text. */}
             {loading ? (
               <>
-                <span className="material-symbols-outlined animate-spin text-[20px]">
+                <span
+                  className="material-symbols-outlined animate-spin text-[20px]"
+                  aria-hidden="true"
+                >
                   progress_activity
                 </span>
-                <span className="hidden sm:inline">Loading…</span>
+                <span className="sr-only sm:not-sr-only">Loading…</span>
               </>
             ) : (
               <>
-                <span className="hidden sm:inline">Get formats</span>
-                <span className="material-symbols-outlined text-[20px]">arrow_forward</span>
+                <span className="sr-only sm:not-sr-only">Get formats</span>
+                <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
+                  arrow_forward
+                </span>
               </>
             )}
           </button>

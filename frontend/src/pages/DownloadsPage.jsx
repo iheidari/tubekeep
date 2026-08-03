@@ -21,7 +21,9 @@ function RedownloadLink({ url }) {
       to={`/info?url=${encodeURIComponent(url)}`}
       className="border border-primary text-primary px-6 py-2 rounded-md font-label-md text-label-md flex items-center gap-2 hover:bg-primary/5 transition-all active:scale-95"
     >
-      <span className="material-symbols-outlined text-[18px]">refresh</span>
+      <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+        refresh
+      </span>
       Redownload
     </Link>
   )
@@ -65,7 +67,10 @@ function ActiveCard({ download, apiUrl, onDelete, onKeep }) {
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
-            <span className="material-symbols-outlined text-on-surface-variant text-[40px]">
+            <span
+              className="material-symbols-outlined text-on-surface-variant text-[40px]"
+              aria-hidden="true"
+            >
               {isAudio ? 'music_note' : 'movie'}
             </span>
           </div>
@@ -97,6 +102,7 @@ function ActiveCard({ download, apiUrl, onDelete, onKeep }) {
                 <span
                   className="material-symbols-outlined text-[14px]"
                   style={download.kept ? { fontVariationSettings: "'FILL' 1" } : undefined}
+                  aria-hidden="true"
                 >
                   push_pin
                 </span>
@@ -106,6 +112,7 @@ function ActiveCard({ download, apiUrl, onDelete, onKeep }) {
                 <span
                   className="material-symbols-outlined text-[14px]"
                   style={{ fontVariationSettings: "'FILL' 1" }}
+                  aria-hidden="true"
                 >
                   check_circle
                 </span>
@@ -144,6 +151,7 @@ function ActiveCard({ download, apiUrl, onDelete, onKeep }) {
             <span
               className="material-symbols-outlined text-[18px]"
               style={{ fontVariationSettings: "'FILL' 1" }}
+              aria-hidden="true"
             >
               {isAudio ? 'headphones' : 'play_arrow'}
             </span>
@@ -157,8 +165,11 @@ function ActiveCard({ download, apiUrl, onDelete, onKeep }) {
                 onClick={share}
                 className="p-2 text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-all rounded-full"
                 title={copied ? 'Copied!' : 'Share play link'}
+                aria-label={copied ? 'Play link copied' : 'Share play link'}
               >
-                <span className="material-symbols-outlined">{copied ? 'check' : 'share'}</span>
+                <span className="material-symbols-outlined" aria-hidden="true">
+                  {copied ? 'check' : 'share'}
+                </span>
               </button>
               <a
                 href={downloadHref}
@@ -166,15 +177,24 @@ function ActiveCard({ download, apiUrl, onDelete, onKeep }) {
                 className="p-2 text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-all rounded-full"
                 title="Download file"
               >
-                <span className="material-symbols-outlined">download</span>
+                <span className="material-symbols-outlined" aria-hidden="true">
+                  download
+                </span>
+                {/* Real sr-only text rather than an aria-label: Biome's
+                    useAnchorContent wants an anchor to have content, not just a
+                    name attribute — and the text reads identically to AT. */}
+                <span className="sr-only">Download file</span>
               </a>
               <button
                 type="button"
                 onClick={() => onDelete(download.downloadId)}
                 className="p-2 text-on-surface-variant hover:text-error hover:bg-error-container/20 transition-all rounded-full"
                 title="Delete"
+                aria-label="Delete download"
               >
-                <span className="material-symbols-outlined">delete</span>
+                <span className="material-symbols-outlined" aria-hidden="true">
+                  delete
+                </span>
               </button>
             </div>
           </div>
@@ -198,13 +218,18 @@ function ExpiredCard({ download, onForget }) {
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
-            <span className="material-symbols-outlined text-on-surface-variant/50 text-[40px]">
+            <span
+              className="material-symbols-outlined text-on-surface-variant/50 text-[40px]"
+              aria-hidden="true"
+            >
               {isAudio ? 'music_note' : 'movie'}
             </span>
           </div>
         )}
         <div className="absolute inset-0 bg-background/40 flex items-center justify-center">
-          <span className="material-symbols-outlined text-white text-[40px]">history</span>
+          <span className="material-symbols-outlined text-white text-[40px]" aria-hidden="true">
+            history
+          </span>
         </div>
       </div>
 
@@ -215,7 +240,9 @@ function ExpiredCard({ download, onForget }) {
               {download.title}
             </h3>
             <span className="flex items-center gap-1 text-on-error-container font-label-sm text-label-sm whitespace-nowrap bg-error-container px-2 py-0.5 rounded-full">
-              <span className="material-symbols-outlined text-[14px]">error_outline</span>
+              <span className="material-symbols-outlined text-[14px]" aria-hidden="true">
+                error_outline
+              </span>
               Expired
             </span>
           </div>
@@ -251,8 +278,11 @@ function ExpiredCard({ download, onForget }) {
               onClick={() => onForget(download.downloadId)}
               className="p-2 text-on-surface-variant hover:text-error hover:bg-error-container/20 transition-all rounded-full"
               title="Forget"
+              aria-label="Forget expired download"
             >
-              <span className="material-symbols-outlined">delete</span>
+              <span className="material-symbols-outlined" aria-hidden="true">
+                delete
+              </span>
             </button>
           </div>
         </div>
@@ -277,13 +307,18 @@ function MovedCard({ download, onForget }) {
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center">
-            <span className="material-symbols-outlined text-on-surface-variant text-[40px]">
+            <span
+              className="material-symbols-outlined text-on-surface-variant text-[40px]"
+              aria-hidden="true"
+            >
               {isAudio ? 'music_note' : 'movie'}
             </span>
           </div>
         )}
         <div className="absolute inset-0 bg-background/30 flex items-center justify-center">
-          <span className="material-symbols-outlined text-white text-[40px]">cloud_done</span>
+          <span className="material-symbols-outlined text-white text-[40px]" aria-hidden="true">
+            cloud_done
+          </span>
         </div>
       </div>
 
@@ -345,8 +380,11 @@ function MovedCard({ download, onForget }) {
             onClick={() => onForget(download.downloadId)}
             className="p-2 text-on-surface-variant hover:text-error hover:bg-error-container/20 transition-all rounded-full"
             title="Remove from list"
+            aria-label="Remove from list"
           >
-            <span className="material-symbols-outlined">delete</span>
+            <span className="material-symbols-outlined" aria-hidden="true">
+              delete
+            </span>
           </button>
         </div>
       </div>
@@ -596,7 +634,10 @@ function DownloadsPage() {
 
       {items.length === 0 ? (
         <div className="bg-surface-container-low border border-outline-variant rounded-xl p-12 text-center">
-          <span className="material-symbols-outlined text-[48px] text-outline-variant mb-3 block">
+          <span
+            className="material-symbols-outlined text-[48px] text-outline-variant mb-3 block"
+            aria-hidden="true"
+          >
             cloud_download
           </span>
           <p className="font-body-md text-body-md text-secondary">

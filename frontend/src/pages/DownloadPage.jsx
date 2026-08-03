@@ -51,7 +51,12 @@ function DownloadPage() {
     return (
       <div className="max-w-4xl mx-auto">
         <div className="bg-error-container border border-error rounded-xl p-6 text-center">
-          <span className="material-symbols-outlined text-[40px] text-error mb-2 block">error</span>
+          <span
+            className="material-symbols-outlined text-[40px] text-error mb-2 block"
+            aria-hidden="true"
+          >
+            error
+          </span>
           <p className="font-body-md text-body-md text-on-error-container mb-4">{error}</p>
           <button
             type="button"

@@ -17,7 +17,7 @@ function ThemeToggle() {
       aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
       className="w-9 h-9 flex items-center justify-center rounded-full text-muted hover:text-ink hover:bg-tint transition-colors"
     >
-      <span className="material-symbols-outlined text-[20px]">
+      <span className="material-symbols-outlined text-[20px]" aria-hidden="true">
         {dark ? 'light_mode' : 'dark_mode'}
       </span>
     </button>

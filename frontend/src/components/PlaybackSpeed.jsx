@@ -31,18 +31,24 @@ function PlaybackSpeed() {
 
   return (
     <div ref={rootRef} className="relative">
+      {/* The trigger's visible label is just the rate ("1×"), so its accessible
+          name repeats that after the purpose — keeping the visible text inside
+          the name (WCAG 2.5.3) now the decorative icon is aria-hidden. */}
       <button
         ref={triggerRef}
         type="button"
         onClick={onTriggerClick}
         onKeyDown={onTriggerKeyDown}
         title="Playback speed"
+        aria-label={`Playback speed ${playbackRate}×`}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={open ? menuId : undefined}
         className="flex items-center gap-1 bg-black/60 text-white rounded-full font-semibold text-[12.5px] px-3 py-1.5 backdrop-blur-sm hover:bg-black/75 active:scale-95 transition-all"
       >
-        <span className="material-symbols-outlined text-[16px]">speed</span>
+        <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+          speed
+        </span>
         {playbackRate}×
       </button>
       {open ? (
@@ -74,7 +80,9 @@ function PlaybackSpeed() {
               >
                 {rate === 1 ? 'Normal' : `${rate}×`}
                 {selected ? (
-                  <span className="material-symbols-outlined text-[16px]">check</span>
+                  <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
+                    check
+                  </span>
                 ) : null}
               </button>
             )

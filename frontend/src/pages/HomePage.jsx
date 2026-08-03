@@ -24,7 +24,10 @@ function HomePage() {
             <span className="bg-tint text-ink rounded-full px-2.5 py-0.5 text-[12px] font-semibold">
               {total}
             </span>
-            <span className="material-symbols-outlined text-[18px] text-faint group-hover:translate-x-1 transition-transform">
+            <span
+              className="material-symbols-outlined text-[18px] text-faint group-hover:translate-x-1 transition-transform"
+              aria-hidden="true"
+            >
               arrow_forward
             </span>
           </Link>

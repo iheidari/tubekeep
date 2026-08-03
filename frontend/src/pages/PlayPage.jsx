@@ -78,7 +78,10 @@ function PlayPageContent({ downloadId }) {
       <div className="max-w-4xl mx-auto">
         {backLink}
         <div className="bg-surface-container-lowest border border-surface-variant rounded-xl p-12 text-center">
-          <span className="material-symbols-outlined text-[48px] text-secondary mb-3 block">
+          <span
+            className="material-symbols-outlined text-[48px] text-secondary mb-3 block"
+            aria-hidden="true"
+          >
             schedule
           </span>
           <h2 className="font-headline-md text-headline-md text-on-surface mb-2">File not found</h2>
@@ -92,7 +95,9 @@ function PlayPageContent({ downloadId }) {
                 to={`/info?url=${encodeURIComponent(stale.url)}`}
                 className="bg-primary text-on-primary px-4 py-2 rounded-lg font-label-md text-label-md hover:bg-primary-container transition-colors inline-flex items-center gap-2"
               >
-                <span className="material-symbols-outlined text-[18px]">refresh</span>
+                <span className="material-symbols-outlined text-[18px]" aria-hidden="true">
+                  refresh
+                </span>
                 Re-download
               </Link>
             )}
@@ -113,7 +118,10 @@ function PlayPageContent({ downloadId }) {
       <div className="max-w-4xl mx-auto">
         {backLink}
         <div className="bg-surface-container-lowest border border-surface-variant rounded-xl p-12 text-center">
-          <span className="material-symbols-outlined animate-spin text-[40px] text-primary mb-3 block">
+          <span
+            className="material-symbols-outlined animate-spin text-[40px] text-primary mb-3 block"
+            aria-hidden="true"
+          >
             progress_activity
           </span>
           <p className="font-body-md text-body-md text-secondary">Loading…</p>
