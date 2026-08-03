@@ -1,16 +1,31 @@
-# React + Vite
+# Tubekeep — frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The Vite + React single-page app. Plain JSX (no TypeScript build), routed with
+`react-router-dom`, talking to the Express API in [`../backend`](../backend).
 
-Currently, two official plugins are available:
+## Scripts
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Run from this directory:
 
-## React Compiler
+| Script | What it does |
+| --- | --- |
+| `npm run dev` | Vite dev server on port 5173, proxying `/api` to the backend on port 3001 |
+| `npm run build` | Production build to `dist/` |
+| `npm run lint` | Biome (lint + format diagnostics), using the repo-root `biome.json` |
+| `npm test` | Playwright accessibility smoke suite (`test/a11y/`) |
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+The Playwright suite needs a browser on a fresh clone — run `npm run test:install`
+once before the first `npm test`.
 
-## Expanding the ESLint configuration
+`npm run preview` serves the built `dist/` on port 4173 with the same API proxy, and
+`npm run test:ui` opens the Playwright UI.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+## Where the rest is documented
+
+This package deliberately keeps no documentation of its own beyond the above. See:
+
+- [`../README.md`](../README.md) — what Tubekeep is, the architecture, and how to run
+  both services together.
+- [`../CLAUDE.md`](../CLAUDE.md) — the conventions to read before editing this package,
+  under **Frontend (`frontend/src/`)** and **Styling system — non-obvious**. Read the
+  latter first; the styling setup is not what the file layout suggests.
