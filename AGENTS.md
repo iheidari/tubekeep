@@ -211,11 +211,12 @@ Linting and formatting are configured in the root `biome.json`:
 ### Prerequisites
 - Node.js 18+
 - yt-dlp installed system-wide (`brew install yt-dlp` on macOS)
+- ffmpeg installed system-wide (`brew install ffmpeg` on macOS) — required for every video+audio merge; without it `type: 'video'` downloads fail
 
 ### Key Frontend Dependencies
 - React 19, Vite 8
 - React Router 7 (`createBrowserRouter`, in `main.jsx`)
-- Axios (HTTP client)
+- No HTTP-client dependency — API calls use `apiFetch` (a `credentials: 'include'` wrapper over native `fetch`, in `src/lib/media.js`); SSE uses the browser's `EventSource`
 - Material Symbols via Google Fonts (icons — ligature `<span>`s, always `aria-hidden`; see CLAUDE.md's styling section)
 - Tailwind CSS is **not** a dependency — it loads from the runtime CDN, with the design tokens inline in `frontend/index.html` (see CLAUDE.md's styling section)
 - `@playwright/test` (dev, pinned exactly — it determines the browser build)

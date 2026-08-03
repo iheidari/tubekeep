@@ -55,7 +55,7 @@ tubekeep/
 - **Vite 8** - Build tool and dev server
 - **React 19** - UI library
 - **React Router 7** - Routing (`createBrowserRouter`)
-- **Axios** - HTTP client (for info fetch)
+- **No HTTP-client dependency** - every API call goes through `apiFetch`, a thin `credentials: 'include'` wrapper over the browser's native `fetch` (`src/lib/media.js`); download progress uses the browser's `EventSource` (SSE)
 - **Material Symbols** (Google Fonts) - Icon library, rendered as ligature text in a `<span class="material-symbols-outlined">`
 - **Tailwind CSS via the runtime CDN** - Styling, with the whole Material Design 3 design-token theme declared inline in `frontend/index.html`. There is no Tailwind dependency, `tailwind.config.js`, or PostCSS in this repo — see CLAUDE.md → *Styling system — non-obvious* before changing a token.
 - **Playwright** - The a11y smoke suite (`frontend/test/a11y/`)
@@ -100,6 +100,26 @@ Before running the application, ensure you have:
    **Verify installation:**
    ```bash
    yt-dlp --version
+   ```
+
+3. **ffmpeg** installed on your system
+
+   Required for every video+audio merge (`type: 'video'` downloads are merged
+   to mp4). Without it, high-quality downloads fail.
+
+   **macOS:**
+   ```bash
+   brew install ffmpeg
+   ```
+
+   **Ubuntu/Debian:**
+   ```bash
+   sudo apt install ffmpeg
+   ```
+
+   **Verify installation:**
+   ```bash
+   ffmpeg -version
    ```
 
 ## Installation

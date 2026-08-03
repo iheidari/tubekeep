@@ -14,7 +14,7 @@ export default defineConfig({
         manualChunks: (id) => {
           // Code splitting for better caching
           if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('axios')) {
+            if (id.includes('react')) {
               return 'vendor'
             }
           }
