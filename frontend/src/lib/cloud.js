@@ -12,8 +12,8 @@
 import { API_URL, apiFetch } from './media'
 
 // Per-provider static metadata. The OAuth client id + redirect URI are resolved
-// at runtime from the backend's /api/cloud/providers (or a VITE_ override). The
-// `configKey` is the field the backend publishes the client id under.
+// at runtime from the backend's /api/cloud/providers (which publishes them
+// under `clientId` for every provider) or a VITE_ override.
 const PROVIDERS = {
   dropbox: {
     label: 'Dropbox',
@@ -22,7 +22,6 @@ const PROVIDERS = {
     scopes: 'files.content.write account_info.read',
     // `offline` so we receive a refresh token for the ~4h access token.
     authParams: { token_access_type: 'offline' },
-    configKey: 'appKey',
     viteClientId: 'VITE_DROPBOX_APP_KEY',
     viteRedirect: 'VITE_DROPBOX_REDIRECT_URI',
   },
@@ -34,7 +33,6 @@ const PROVIDERS = {
     // Google only returns a refresh token with access_type=offline, and only
     // re-issues one when the user is re-prompted for consent.
     authParams: { access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true' },
-    configKey: 'clientId',
     viteClientId: 'VITE_GOOGLE_CLIENT_ID',
     viteRedirect: 'VITE_GOOGLE_REDIRECT_URI',
   },
@@ -71,7 +69,7 @@ let providersPromise = null
 function resolveConfig(name, serverEntry) {
   const meta = PROVIDERS[name]
   if (!meta) return null
-  const clientId = import.meta.env[meta.viteClientId] || serverEntry?.[meta.configKey]
+  const clientId = import.meta.env[meta.viteClientId] || serverEntry?.clientId
   if (!clientId) return null
   return {
     name,

@@ -21,6 +21,7 @@ function toApiRow(row) {
   return {
     downloadId: row.download_id,
     url: row.url,
+    sourceKey: row.source_key || null,
     title: row.title,
     thumbnail: row.thumbnail,
     type: row.type,
@@ -52,6 +53,18 @@ const countsTowardUsage = (r) => !r.expired && !r.moved && r.status !== 'failed'
 const SUPERSEDABLE_SQL = "NOT moved AND coalesce(status, '') <> 'downloading'";
 const isSupersedable = (r) => !r.moved && r.status !== 'downloading';
 
+// Does a candidate row share the fresh download's canonical video identity
+// (0XC-117)? When BOTH sides carry a `source_key`, that's the match — it's
+// stable across every URL form the same video can be pasted as, so a
+// differing `url` no longer defeats the match. Whenever either side lacks a
+// key (a pre-migration row, or an extractor that returned no id), fall back
+// to exact `url` equality, exactly as before this ticket. Written once here
+// and mirrored in SQL in `createStore.supersedeForUser` — keep both in step.
+const sharesSource = (row, freshSourceKey, freshUrl) =>
+  freshSourceKey && row.source_key
+    ? row.source_key === freshSourceKey
+    : !!freshUrl && row.url === freshUrl;
+
 // Whether this row's media is actually on our disk right now — i.e. whether a
 // `filename` is worth handing out. False while still downloading, after a
 // failure, once moved to the user's own cloud, and once expired. Lives here with
@@ -66,13 +79,23 @@ function createStore(query) {
   return {
     // Record a download the moment it starts, so the row exists (as
     // `downloading`) even if the client never comes back for the SSE.
-    async insert({ downloadId, userId, url, title, thumbnail, type, filesize, kept }) {
+    async insert({ downloadId, userId, url, title, thumbnail, type, filesize, kept, sourceKey }) {
       await query(
         `INSERT INTO downloads
-           (download_id, user_id, url, title, thumbnail, type, filesize, status, kept)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'downloading', $8)
+           (download_id, user_id, url, title, thumbnail, type, filesize, status, kept, source_key)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, 'downloading', $8, $9)
          ON CONFLICT (download_id) DO NOTHING`,
-        [downloadId, userId, url, title, thumbnail, type, filesize ?? null, !!kept],
+        [
+          downloadId,
+          userId,
+          url,
+          title,
+          thumbnail,
+          type,
+          filesize ?? null,
+          !!kept,
+          sourceKey ?? null,
+        ],
       );
     },
 
@@ -113,21 +136,40 @@ function createStore(query) {
     },
 
     // The job finished: record the real filename and the ACTUAL byte size (the
-    // size used at insert time came from the untrusted client-supplied estimate).
-    async markComplete(downloadId, { filename, filesize }) {
-      await query(
+    // size used at insert time came from the untrusted client-supplied
+    // estimate). `onlyIfDownloading` is for the cleanup sweep's reconcile
+    // (see cleanup.js): a `downloading` row whose completion hook's write was
+    // lost even though the job actually finished — the media is already on
+    // disk. With it set, this is a no-op (returns false) unless the row is
+    // still `downloading`, so calling it on an already-resolved row changes
+    // nothing. Without it (the normal completion path), it always applies and
+    // the return value is unused.
+    async markComplete(downloadId, { filename, filesize }, { onlyIfDownloading = false } = {}) {
+      const { rowCount } = await query(
         `UPDATE downloads
             SET status = 'complete',
                 completed_at = now(),
                 filename = $2,
                 filesize = coalesce($3, filesize)
-          WHERE download_id = $1`,
+          WHERE download_id = $1 ${onlyIfDownloading ? "AND status = 'downloading'" : ''}`,
         [downloadId, filename ?? null, filesize ?? null],
       );
+      return rowCount > 0;
     },
 
     async markFailed(downloadId) {
       await query("UPDATE downloads SET status = 'failed' WHERE download_id = $1", [downloadId]);
+    },
+
+    // The small, normally-empty set of rows the cleanup sweep's reconcile
+    // needs to even consider — lets it skip stat-ing and updating every live
+    // download on disk each hour and only look at ones that could possibly be
+    // stranded. See cleanup.js.
+    async downloadingIds() {
+      const { rows } = await query(
+        "SELECT download_id FROM downloads WHERE status = 'downloading'",
+      );
+      return rows.map((r) => r.download_id);
     },
 
     // Reconcile history against the filesystem: every completed, still-live row
@@ -162,6 +204,14 @@ function createStore(query) {
         downloadId,
         movedInfo ? JSON.stringify(movedInfo) : null,
       ]);
+    },
+
+    // Every `kept` download's id, across all users — the cleanup sweep's
+    // exclusion set. A directory the sweep would otherwise age out is never
+    // touched while its row says `kept`, no matter how stale it looks on disk.
+    async keptIds() {
+      const { rows } = await query('SELECT download_id FROM downloads WHERE kept', []);
+      return rows.map((r) => r.download_id);
     },
 
     // Retire `downloading` rows that can no longer be running. The job registry
@@ -210,23 +260,32 @@ function createStore(query) {
       return rowCount > 0;
     },
 
-    // One row per source URL (0XC-10): a download that just COMPLETED replaces
-    // the same user's older rows for the same URL. Returns the superseded ids so
+    // One row per canonical video identity (0XC-10, refined by 0XC-117): a
+    // download that just COMPLETED replaces the same user's older rows for the
+    // same video — matched on `source_key` when both sides have one, else on
+    // the raw `url` (see `sharesSource` above). Returns the superseded ids so
     // the caller can remove their media too. Two rows are deliberately spared:
     //   - `moved` — the media is in the user's own cloud and the row still
     //     carries the "Open in Dropbox/Drive" link, which a re-download doesn't
     //     supersede.
-    //   - `downloading` — a concurrent job for the same URL. Deleting its row
+    //   - `downloading` — a concurrent job for the same video. Deleting its row
     //     would orphan a running job (and strand its partial files).
     // Expired, failed and live completed rows all go. `SUPERSEDABLE_SQL` and
     // `isSupersedable` are one rule written twice — keep them adjacent.
-    async supersedeForUser({ downloadId, userId, url }) {
+    async supersedeForUser({ downloadId, userId, url, sourceKey }) {
       if (!url) return [];
+      const key = sourceKey ?? null;
       const { rows } = await query(
         `DELETE FROM downloads
-          WHERE user_id = $1 AND url = $2 AND download_id <> $3 AND ${SUPERSEDABLE_SQL}
+          WHERE user_id = $1
+            AND download_id <> $2
+            AND ${SUPERSEDABLE_SQL}
+            AND CASE WHEN $3::text IS NOT NULL AND source_key IS NOT NULL
+                     THEN source_key = $3
+                     ELSE url = $4
+                END
           RETURNING download_id`,
-        [userId, url, downloadId],
+        [userId, downloadId, key, url],
       );
       return rows.map((r) => r.download_id);
     },
@@ -240,12 +299,13 @@ function createMemoryStore({ rows = [] } = {}) {
   const byId = new Map(rows.map((r) => [r.download_id, r]));
 
   return {
-    async insert({ downloadId, userId, url, title, thumbnail, type, filesize, kept }) {
+    async insert({ downloadId, userId, url, title, thumbnail, type, filesize, kept, sourceKey }) {
       if (byId.has(downloadId)) return;
       byId.set(downloadId, {
         download_id: downloadId,
         user_id: userId,
         url,
+        source_key: sourceKey ?? null,
         title,
         thumbnail,
         type,
@@ -282,17 +342,22 @@ function createMemoryStore({ rows = [] } = {}) {
       }
       return used;
     },
-    async markComplete(downloadId, { filename, filesize }) {
+    async markComplete(downloadId, { filename, filesize }, { onlyIfDownloading = false } = {}) {
       const row = byId.get(downloadId);
-      if (!row) return;
+      if (!row) return false;
+      if (onlyIfDownloading && row.status !== 'downloading') return false;
       row.status = 'complete';
       row.completed_at = new Date();
       row.filename = filename ?? null;
       if (filesize !== null && filesize !== undefined) row.filesize = filesize;
+      return true;
     },
     async markFailed(downloadId) {
       const row = byId.get(downloadId);
       if (row) row.status = 'failed';
+    },
+    async downloadingIds() {
+      return [...byId.values()].filter((r) => r.status === 'downloading').map((r) => r.download_id);
     },
     async expireMissing(presentIds, graceMs = 0) {
       const present = new Set(presentIds || []);
@@ -318,6 +383,9 @@ function createMemoryStore({ rows = [] } = {}) {
       if (!row) return;
       row.moved = true;
       row.moved_info = movedInfo || null;
+    },
+    async keptIds() {
+      return [...byId.values()].filter((r) => r.kept).map((r) => r.download_id);
     },
     async failStale(olderThanMs) {
       const cutoff = Date.now() - olderThanMs;
@@ -349,15 +417,15 @@ function createMemoryStore({ rows = [] } = {}) {
       byId.delete(downloadId);
       return true;
     },
-    async supersedeForUser({ downloadId, userId, url }) {
+    async supersedeForUser({ downloadId, userId, url, sourceKey }) {
       if (!url) return [];
       const gone = [];
       for (const row of byId.values()) {
         if (
           row.user_id === userId &&
-          row.url === url &&
           row.download_id !== downloadId &&
-          isSupersedable(row)
+          isSupersedable(row) &&
+          sharesSource(row, sourceKey, url)
         ) {
           gone.push(row.download_id);
         }

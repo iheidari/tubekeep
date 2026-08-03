@@ -15,6 +15,10 @@ function moveRunwayMs(download) {
   return createdAt + FILE_EXPIRY_MS - Date.now()
 }
 
+// Id linking the "expiring soon" reason to its button via aria-describedby —
+// same pairing FormatSelector uses for its own aria-disabled reason.
+const expiringSoonId = (downloadId) => `expiring-soon-${downloadId}`
+
 // "Move to cloud" control for a completed download. Renders nothing when the
 // server hasn't configured any cloud provider. A single button opens a provider
 // menu (Dropbox / Google Drive / …); with just one enabled provider it moves
@@ -57,8 +61,9 @@ function MoveToCloud({ download, downloadHref, onMoved }) {
       <div className="flex flex-col items-stretch gap-1 min-w-[9rem]">
         <button
           type="button"
-          disabled
+          aria-disabled="true"
           title="This file is about to expire — download it to your device instead."
+          aria-describedby={expiringSoonId(download.downloadId)}
           className="flex items-center justify-center gap-1 text-on-surface-variant/60 font-label-sm text-label-sm whitespace-nowrap border border-outline-variant px-3 py-1 rounded-full cursor-default"
         >
           <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
@@ -66,7 +71,10 @@ function MoveToCloud({ download, downloadHref, onMoved }) {
           </span>
           Move to cloud
         </button>
-        <span className="font-label-sm text-label-sm text-on-surface-variant/70 text-center">
+        <span
+          id={expiringSoonId(download.downloadId)}
+          className="font-label-sm text-label-sm text-on-surface-variant/70 text-center"
+        >
           Expiring soon
         </span>
       </div>
@@ -189,7 +197,7 @@ function MoveToCloud({ download, downloadHref, onMoved }) {
           role="menu"
           aria-label="Cloud provider"
           onKeyDown={onMenuKeyDown}
-          className="absolute top-full left-0 right-0 mt-1 z-10 bg-surface-container-high border border-outline-variant rounded-lg shadow-lg overflow-hidden"
+          className="absolute top-full left-0 right-0 mt-1 z-10 bg-surface-container-high border border-outline-variant rounded-lg shadow-lg overflow-hidden p-1"
         >
           {providers.map((p, index) => {
             const { ref, tabIndex } = getItemProps(index)
@@ -201,7 +209,7 @@ function MoveToCloud({ download, downloadHref, onMoved }) {
                 role="menuitem"
                 tabIndex={tabIndex}
                 onClick={() => choose(p.name)}
-                className="flex items-center gap-2 w-full px-3 py-2 text-on-surface font-label-sm text-label-sm hover:bg-primary/10 transition-colors text-left"
+                className="flex items-center gap-2 w-full px-3 py-2 rounded-md text-on-surface font-label-sm text-label-sm hover:bg-primary/10 transition-colors text-left"
               >
                 <span
                   className="material-symbols-outlined text-[18px] text-primary"
