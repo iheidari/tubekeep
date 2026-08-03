@@ -37,19 +37,27 @@ tubekeep/
 
 ### Backend
 - **Node.js 18+** - Runtime environment
-- **Express.js** - Web framework
+- **Express 4** - Web framework
 - **yt-dlp** - Video downloading engine (CLI tool)
+- **pg** - Postgres client (Neon; per-user history, quotas, and the `users` allowlist)
+- **jsonwebtoken** - Session-cookie JWTs for the magic-link login
+- **resend** - Transactional email for the magic link (unset key → link logged to the console)
+- **dropbox** - SDK for the Dropbox "Move to cloud" provider (Google Drive and OneDrive are hand-rolled over `fetch`)
 - **helmet** - Security headers
 - **cors** - Cross-origin resource sharing
 - **morgan** - HTTP request logging
+- **cookie-parser** - Reads the session cookie
+- **dotenv** - Loads `backend/.env`
 - **uuid** - Unique ID generation
 
 ### Frontend
-- **Vite 5+** - Build tool and dev server
-- **React 18** - UI library
+- **Vite 8** - Build tool and dev server
+- **React 19** - UI library
+- **React Router 7** - Routing (`createBrowserRouter`)
 - **Axios** - HTTP client (for info fetch)
 - **Material Symbols** (Google Fonts) - Icon library, rendered as ligature text in a `<span class="material-symbols-outlined">`
-- **CSS Modules** - Component styling
+- **Tailwind CSS via the runtime CDN** - Styling, with the whole Material Design 3 design-token theme declared inline in `frontend/index.html`. There is no Tailwind dependency, `tailwind.config.js`, or PostCSS in this repo — see CLAUDE.md → *Styling system — non-obvious* before changing a token.
+- **Playwright** - The a11y smoke suite (`frontend/test/a11y/`)
 
 ## Features
 
@@ -324,7 +332,7 @@ pip install yt-dlp
 - Chrome/Firefox have the best video codec support
 
 ### "Failed to load media" error
-- The file may have been cleaned up (24-hour limit)
+- The media may have been expired by the cleanup sweep (1 hour, `MAX_FILE_AGE_HOURS`)
 - Re-download the video
 
 ### CORS errors

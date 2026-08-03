@@ -17,9 +17,6 @@ export default defineConfig({
             if (id.includes('react') || id.includes('axios')) {
               return 'vendor'
             }
-            if (id.includes('lucide-react')) {
-              return 'icons'
-            }
           }
         },
         // Asset naming for cache busting
