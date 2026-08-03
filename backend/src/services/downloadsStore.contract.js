@@ -289,11 +289,12 @@ function runDownloadsStoreContract({ label, freshStore, backdate, skip = false }
     await seedComplete(store, vanished, USER, 100);
     await store.insert({ downloadId: running, userId: USER, filesize: 100 });
     // Age them past the grace window (asserted separately below) so this case is
-    // only about presence on disk, not about how recently they finished.
+    // only about presence on disk, not about how recently they finished. The
+    // in-flight row gets no completion stamp — it has not completed.
     const old = new Date(Date.now() - HOUR);
-    for (const each of [onDisk, vanished, running]) {
-      await backdate(store, each, { createdAt: old, completedAt: old });
-    }
+    await backdate(store, onDisk, { createdAt: old, completedAt: old });
+    await backdate(store, vanished, { createdAt: old, completedAt: old });
+    await backdate(store, running, { createdAt: old });
 
     assert.equal(await store.expireMissing([onDisk, running]), 1);
     assert.equal((await store.findForUser(vanished, USER)).expired, true);
@@ -309,9 +310,8 @@ function runDownloadsStoreContract({ label, freshStore, backdate, skip = false }
     await seedComplete(store, cloud, USER, 100);
     await store.markMoved(cloud, { provider: 'dropbox' });
     const old = new Date(Date.now() - HOUR);
-    for (const each of [gone, cloud]) {
-      await backdate(store, each, { createdAt: old, completedAt: old });
-    }
+    await backdate(store, gone, { createdAt: old, completedAt: old });
+    await backdate(store, cloud, { createdAt: old, completedAt: old });
 
     // An empty directory snapshot is the ordinary "everything aged out" case,
     // and on the SQL side it is the one that puts an empty array through the
