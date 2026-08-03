@@ -39,6 +39,7 @@ tubekeep/
 - **Node.js 18+** - Runtime environment
 - **Express 4** - Web framework
 - **yt-dlp** - Video downloading engine (CLI tool)
+- **ffmpeg** - Merges separate video + audio streams into mp4 (CLI tool)
 - **pg** - Postgres client (Neon; per-user history, quotas, and the `users` allowlist)
 - **jsonwebtoken** - Session-cookie JWTs for the magic-link login
 - **resend** - Transactional email for the magic link (unset key → link logged to the console)
