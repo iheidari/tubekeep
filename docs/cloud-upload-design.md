@@ -1,10 +1,11 @@
 # Cloud Upload ("Move to cloud") — Design & Next Steps
 
-> Status: **implemented** for **Dropbox and Google Drive**. This document is the agreed design
-> from the design interview; OneDrive remains a fast-follow. See "Implementation" below for where
-> the code lives. To enable a provider, set its env vars (Dropbox →
-> [dropbox-setup.md](./dropbox-setup.md); Google Drive → [google-drive-setup.md](./google-drive-setup.md));
-> with them unset that provider is cleanly hidden from the "Move to cloud" menu.
+> Status: **implemented** for **Dropbox, Google Drive, and OneDrive**. This document is the agreed
+> design from the design interview. See "Implementation" below for where the code lives. To
+> enable a provider, set its env vars (Dropbox → [dropbox-setup.md](./dropbox-setup.md); Google
+> Drive → [google-drive-setup.md](./google-drive-setup.md); OneDrive →
+> [onedrive-setup.md](./onedrive-setup.md)); with them unset that provider is cleanly hidden from
+> the "Move to cloud" menu.
 
 ## Goal
 
@@ -55,8 +56,9 @@ server → hand to the visitor's cloud → forget.
 ### Providers
 - **v1: Dropbox only.** Fastest path to the exact security model (PKCE public client, browser
   refresh token, no verification wait).
-- **Fast-follow:** OneDrive, then Google Drive. **Start Google verification paperwork early** —
-  it's the long pole. Use **`drive.file` scope only** (upload-only, can't see the user's files).
+- **Shipped fast-follows:** Google Drive (`drive.file` scope only — upload-only, can't see the
+  user's files) and OneDrive (`Files.ReadWrite.AppFolder` scope, genuinely secret-less public
+  client — see the OneDrive specifics below).
 - **Easy later adds:** Box, pCloud (same OAuth-relay shape).
 - **Separate interface later, only if requested:** WebDAV (Nextcloud/ownCloud/Koofr) and
   S3-compatible (B2/R2/Wasabi) — these use pasted credentials/keys, not per-visitor OAuth, so
@@ -75,6 +77,23 @@ server → hand to the visitor's cloud → forget.
 - **PKCE + `state`** required (CSRF); verifier + state in sessionStorage.
 - **"Open in Dropbox":** use a **path-based web deep link** (no extra scope) rather than a shared
   link (`sharing.write`) or temporary link (`files.content.read`).
+
+### OneDrive specifics
+- **App-folder scope** (`Files.ReadWrite.AppFolder`), uploads land in `/me/drive/special/approot`
+  — the OneDrive equivalent of Dropbox's app folder / Google's `drive.file` scope. No folder
+  picker, no visibility into the rest of the user's OneDrive.
+- **Genuinely secret-less public client** — unlike Dropbox and Google Drive (whose "public"
+  clients still require a server-held secret for the token exchange), Microsoft Graph's `common`
+  authority supports a true public-client PKCE flow: no `client_secret` anywhere, for either the
+  authorization-code exchange or the refresh. `MS_CLIENT_ID` + `MS_REDIRECT_URI` are the only
+  backend env vars this provider needs.
+- **`common` authority** — the same endpoint accepts both personal (MSA) and work/school
+  (Entra ID) accounts, matching the "both account types" requirement from grooming.
+- **Collisions:** `@microsoft.graph.conflictBehavior: "rename"` on the upload session, mirroring
+  Dropbox's `autorename`.
+- **"Open in OneDrive":** the upload session's terminal response already includes a `webUrl` on
+  the resulting `driveItem` — no separate deep-link construction needed (unlike Dropbox, which
+  builds one by hand).
 
 ### Upload engine
 - **Use the official `dropbox` npm SDK** (handles upload sessions, refresh, typed errors).
@@ -133,14 +152,19 @@ GOOGLE_CLIENT_SECRET=...
 GOOGLE_REDIRECT_URI=https://<host>/oauth/callback    # exact match; add localhost for dev
 GOOGLE_DRIVE_FOLDER=Tubekeep                          # optional; default "Tubekeep"
 
+MS_CLIENT_ID=...                                      # no client secret — public client
+MS_REDIRECT_URI=https://<host>/oauth/callback         # exact match; add localhost for dev
+
 # frontend/.env  (optional — only to OVERRIDE the values the backend publishes)
 VITE_DROPBOX_APP_KEY=...          # public app key for the popup/PKCE
 VITE_DROPBOX_REDIRECT_URI=...     # exact-match redirect URI
 VITE_GOOGLE_CLIENT_ID=...         # public client id for the popup/PKCE
 VITE_GOOGLE_REDIRECT_URI=...      # exact-match redirect URI
+VITE_MS_CLIENT_ID=...             # public client id for the popup/PKCE
+VITE_MS_REDIRECT_URI=...          # exact-match redirect URI
 ```
-See **[dropbox-setup.md](./dropbox-setup.md)** and **[google-drive-setup.md](./google-drive-setup.md)**
-for how to obtain these.
+See **[dropbox-setup.md](./dropbox-setup.md)**, **[google-drive-setup.md](./google-drive-setup.md)**,
+and **[onedrive-setup.md](./onedrive-setup.md)** for how to obtain these.
 
 ---
 
@@ -154,6 +178,11 @@ for how to obtain these.
     Google's `/token`), and the resumable-upload engine (find-or-create the "Tubekeep" folder,
     8 MB chunked PUTs to a resumable session, per-chunk retry, disk streaming, same typed
     CloudError codes `auth`/`quota`/`upload`). Uses the `drive.file` scope (app-created files only).
+  - `services/cloud/onedrive.js` — provider: PKCE-only token exchange + refresh (direct to Graph's
+    `common` authority `/token`, no client secret), and the resumable-upload engine (upload
+    session against `/me/drive/special/approot`, 10 MiB chunked PUTs — a multiple of Graph's
+    required 320 KiB unit — per-chunk retry, disk streaming, same typed CloudError codes
+    `auth`/`quota`/`upload`). Uses the `Files.ReadWrite.AppFolder` scope.
   - `services/cloud/index.js` — provider registry (`getProvider`, `listEnabledProviders`).
   - `services/cloud/jobs.js` — in-memory job manager: concurrency cap (3), queue, per-job
     EventEmitter, hard TTL (30m), token cleared the instant a job settles. On success calls
@@ -163,8 +192,8 @@ for how to obtain these.
     `POST /upload` (token in body → jobId), `GET /upload/:jobId/progress` (SSE). Mounted at
     `/api/cloud` with per-IP rate limiting.
 - **Frontend**
-  - `lib/cloud.js` — generic, data-driven by a per-provider table (Dropbox, Google Drive): PKCE
-    (Web Crypto), popup connect, per-provider sessionStorage token store, refresh-aware
+  - `lib/cloud.js` — generic, data-driven by a per-provider table (Dropbox, Google Drive,
+    OneDrive): PKCE (Web Crypto), popup connect, per-provider sessionStorage token store, refresh-aware
     `getFreshAccessToken(provider)`, `getEnabledProviders()`. Config resolved from
     `/api/cloud/providers` (VITE_ vars optional overrides).
   - `pages/OAuthCallbackPage.jsx` + `/oauth/callback` route (standalone, outside the app shell).
@@ -181,7 +210,7 @@ for how to obtain these.
 ## Out of scope (parked)
 - **Subscription / retention tier:** paid users get files stored *by us* with a
   user-defined retention period. Future feature, not this change.
-- **OneDrive, Box, pCloud, WebDAV, S3** connectors (roadmap above). *(Google Drive shipped —
+- **Box, pCloud, WebDAV, S3** connectors (roadmap above). *(Google Drive and OneDrive shipped —
   see Implementation.)*
 
 ## Future hardening (make it stronger)
