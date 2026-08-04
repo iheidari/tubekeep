@@ -41,9 +41,10 @@ const PARTIAL_FILE_RE = /\.(part|ytdl)$/i;
 // LARGEST file wins, since the merged output always outweighs any leftover
 // intermediate fragments.
 //
-// This MUST run before failStale: on the same sweep, whichever runs first
-// wins the race for a row that qualifies for both, and only this one is
-// correct for a row with finished media on disk. A genuinely in-flight job is
+// This MUST run before both the age-based expiry and failStale (see the call
+// site's ordering note): on the same sweep, whichever runs first wins the race
+// for a row that qualifies for more than one, and only this one is correct for
+// a row with finished media on disk. A genuinely in-flight job is
 // untouched here — it's excluded via runningDownloadIds() (and a job that
 // died mid-flight leaves partial artifacts, caught above).
 //
@@ -114,6 +115,37 @@ async function runCleanup(store = null) {
   // event loop twice per sweep for the same answer.
   const downloads = listDownloadDirs();
 
+  // Heal hook-stranded rows FIRST — before the age-based sweep below can delete
+  // the very media that proves they finished (0XC-151). A finished directory can
+  // already be older than MAX_FILE_AGE_HOURS the first time any sweep sees it
+  // (the completion hook's DB write was lost, and no earlier sweep caught it);
+  // with the age sweep running first, that media would be gone by the time the
+  // reconcile looked for it, leaving the row stuck `downloading` until failStale
+  // wrongly retired it as `failed` even though the download had succeeded. Run
+  // this way round, the row is corrected to `complete` and then expired by the
+  // ordinary path (its media having just aged out) — the honest outcome.
+  //
+  // A failure here fails CLOSED for both later steps, same reasoning as
+  // keptIds() below: without a trustworthy answer to "did this row actually
+  // finish?", neither deleting its media nor retiring it as failed is safe.
+  let strandedReconcileOk = true;
+  if (store) {
+    try {
+      const strandedComplete = await reconcileStrandedDownloads(store, downloads);
+      if (strandedComplete > 0) {
+        console.log(
+          `🧹 Reconciled ${strandedComplete} stranded download(s) that had already finished`,
+        );
+      }
+    } catch (err) {
+      console.error(
+        '⚠️ Cleanup could not reconcile stranded downloads — skipping age-based expiry and failStale this sweep:',
+        err.message,
+      );
+      strandedReconcileOk = false;
+    }
+  }
+
   // Never age out a directory a job in *this* process is actively writing to.
   // With a store, also spare anything flagged `kept` — the DB is the only
   // remaining record of that, so a directory can't tell on its own. Unlike
@@ -125,7 +157,7 @@ async function runCleanup(store = null) {
   // reasoning as the per-user quota check's fail-closed behavior in
   // routes/download.js.
   const skipIds = new Set(runningDownloadIds());
-  let canExpireByAge = true;
+  let canExpireByAge = strandedReconcileOk;
   if (store) {
     try {
       for (const id of await store.keptIds()) skipIds.add(id);
@@ -154,13 +186,6 @@ async function runCleanup(store = null) {
   // standalone CLI without a database, where this is a no-op.
   if (store) {
     try {
-      const strandedComplete = await reconcileStrandedDownloads(store, downloads);
-      if (strandedComplete > 0) {
-        console.log(
-          `🧹 Reconciled ${strandedComplete} stranded download(s) that had already finished`,
-        );
-      }
-
       // Reconcile against what is actually still on disk, so rows also expire
       // when the files went away by some other route (standalone `npm run
       // cleanup`, a manual rm) — not just when this run expired them. Derived
@@ -177,9 +202,14 @@ async function runCleanup(store = null) {
       if (reconciled > 0) {
         console.log(`🧹 Marked ${reconciled} history row(s) expired`);
       }
-      const stale = await store.failStale(STALE_DOWNLOADING_MS);
-      if (stale > 0) {
-        console.log(`🧹 Marked ${stale} stranded in-progress download(s) as failed`);
+      // Only ever retire a row as failed once the reconcile above has had its
+      // say — it is the only step that can tell a lost hook write apart from a
+      // download that really died.
+      if (strandedReconcileOk) {
+        const stale = await store.failStale(STALE_DOWNLOADING_MS);
+        if (stale > 0) {
+          console.log(`🧹 Marked ${stale} stranded in-progress download(s) as failed`);
+        }
       }
     } catch (err) {
       console.error('⚠️ Cleanup could not update download history:', err.message);
