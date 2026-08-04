@@ -1,47 +1,26 @@
-// The Postgres run of the shared authStore contract (0XC-330).
+// The Postgres run of the shared authStore contract (0XC-330) — the only thing
+// that executes `createStore(query)`'s SQL, and so the only thing that can catch
+// it diverging from the memory impl every other test injects.
 //
-// `createStore(query)` is what production runs, and until this file nothing
-// executed a line of its SQL — so a divergence from the memory impl (which every
-// route and middleware test injects) failed nothing. This runs the identical
-// suite from `authStore.contract.js` against a real database, which is the only
-// way to exercise the `lower(email)` lookup, the `expires_at > now()` comparison,
-// and above all the atomicity of `consumeLoginToken`'s single
-// `UPDATE … WHERE used_at IS NULL` — the property that keeps a magic link
-// single-use under concurrent clicks, and which the single-threaded memory impl
-// cannot fail.
+// It is the sibling of `downloadsStore.pg.test.js` and shares its two ground
+// rules verbatim: it **skips, never fails, without TEST_DATABASE_URL** (so
+// `npm test` stays hermetic offline), and it deliberately bypasses `db.js`,
+// whose unconditional `ssl` would refuse a non-TLS test container — building its
+// own `ssl: false` pool instead of loosening a production TLS default. See
+// CLAUDE.md's contract-test section for the reasoning behind both.
 //
-// **It skips — never fails — without TEST_DATABASE_URL**, so `npm test` on a
-// laptop stays hermetic and offline. CI supplies one from a `postgres:16`
-// service container (see `.github/workflows/ci.yml`), the same variable
-// `downloadsStore.pg.test.js` reads — no CI change was needed to add this file.
+// Two things are specific to this file, both load-bearing and both easy to undo
+// by accident:
 //
-// It deliberately does NOT go through `db.js`: that module sets `ssl` on every
-// pool unconditionally and would refuse a plain non-TLS test container. Rather
-// than loosen a production TLS default for a test, this builds its own pool with
-// `ssl: false` and hands `createStore` the injected query function it already
-// takes. No production code changes.
-//
-// ## Why this run gets its own database
-//
-// `node --test` runs test FILES in parallel, and both pg contract runs need a
-// `users` table they can clear between cases — so pointing both at the one
-// `TEST_DATABASE_URL` database makes them stomp each other, in both directions:
-// this file's `TRUNCATE … users` deletes the rows `downloadsStore.pg.test.js`
-// just seeded (its inserts then fail `downloads_user_id_fkey`), and its truncate
-// deletes these two identities out from under a lookup here (`findUserByEmail`
-// starts returning null). Verified, not theorised: run the two files alone
-// together and 5–6 cases fail every time. It stays green in a full `npm test`
-// only because 300+ other tests happen to keep their windows apart — the worst
-// kind of pass, and exactly the shape of 0XC-275 (test files racing over a
-// shared resource, fixed there by taking the choice away rather than by
-// coordinating).
-//
-// So this file derives a SIBLING database (`<name>_authstore`) and creates it on
-// demand, leaving `TEST_DATABASE_URL`'s own database solely owned by
-// `downloadsStore.pg.test.js`. That keeps the fix one-sided — no change to the
-// existing pg harness, no CI change, no shared-state protocol for a future third
-// file to remember. A new pg contract run should do the same: derive its own
-// database, don't negotiate for the shared one.
+//   1. **It uses its own database** (`<name>_authstore`), because `node --test`
+//      runs test files in parallel and both pg runs clear `users` — sharing one
+//      database makes them truncate each other's rows in both directions (5-6
+//      cases fail every time when the two files run alone together; a full
+//      `npm test` hides it only because other tests keep their windows apart).
+//      Same lesson as 0XC-275: take the choice away rather than coordinate. A
+//      third pg contract run should derive its own database too.
+//   2. **It pre-warms the pool** before each case — see `warmPool`, which is
+//      what keeps the contract's concurrency case from being vacuous.
 
 const { after } = require('node:test');
 const { Pool } = require('pg');
@@ -64,13 +43,37 @@ const skip = connectionString ? false : SKIP_REASON;
 
 // `<name>_authstore`, alongside whatever TEST_DATABASE_URL names. Derived rather
 // than configured so there is no second environment variable for CI to set.
+//
+// Query params are dropped, not carried over: an `sslmode=` in the base URL
+// takes precedence over the explicit `ssl: false` below (verified against pg
+// 8.22), which would silently reintroduce the TLS requirement this file exists
+// to avoid — and `ssl: false` is the whole reason it doesn't go through db.js.
 function deriveSiblingUrl(base) {
   const url = new URL(base);
   const name = decodeURIComponent(url.pathname.replace(/^\//, '')) || 'postgres';
   const sibling = `${name}_authstore`;
   url.pathname = `/${encodeURIComponent(sibling)}`;
+  url.search = '';
   return { url: url.toString(), name: sibling };
 }
+
+// Postgres truncates identifiers at 63 bytes, so two long base names could
+// otherwise collide on one sibling; doubling any `"` keeps a quoted identifier
+// from breaking out. Both are defensive — a normal name hits neither.
+function quoteIdentifier(name) {
+  if (Buffer.byteLength(name) > 63) {
+    throw new Error(
+      `TEST_DATABASE_URL's database name is too long: "${name}" exceeds Postgres's 63-byte ` +
+        'identifier limit once "_authstore" is appended, so it would be silently truncated and ' +
+        'could collide with another database. Use a shorter name.',
+    );
+  }
+  return `"${name.replace(/"/g, '""')}"`;
+}
+
+// The marker table that says "this sibling database belongs to this test file".
+// See `adoptOrRefuse` for why it exists.
+const OWNER_MARKER = 'authstore_contract_owner';
 
 let pool;
 let ready;
@@ -80,37 +83,90 @@ let ready;
 // contract's own constant keeps the two from drifting apart.
 const POOL_MAX = CONCURRENT_CONSUMERS + 3;
 
-// Create the sibling database (once per process) and apply the schema to it.
+// Create the sibling database if it isn't there. Returns whether THIS call
+// created it, which is what `adoptOrRefuse` needs to know.
+//
 // CREATE DATABASE cannot run inside a transaction, which is fine — a pool query
-// is autocommit. 42P04 is "duplicate_database": expected on every run after the
-// first, since the database is deliberately left in place between runs (it is
-// truncated per case, so nothing leaks).
+// is autocommit. Two error codes are expected rather than exceptional:
+//   42P04 duplicate_database — every run after the first; the database is left
+//         in place between runs deliberately (it is truncated per case).
+//   42501 insufficient_privilege — the role can't create databases. That is a
+//         real requirement this file adds and `downloadsStore.pg.test.js` does
+//         not have, so it must say so plainly instead of surfacing a bare
+//         "permission denied to create database", and must name the way out.
+async function createSiblingDatabase(name) {
+  // Ended as soon as the CREATE lands: it is a one-shot connection to the
+  // database TEST_DATABASE_URL names, and that is the database
+  // `downloadsStore.pg.test.js` is concurrently working in — holding a
+  // connection open there for the rest of this run buys nothing.
+  const adminPool = new Pool({ connectionString, ssl: false, max: 1 });
+  try {
+    await adminPool.query(`CREATE DATABASE ${quoteIdentifier(name)}`);
+    return true;
+  } catch (err) {
+    if (err.code === '42P04') return false;
+    if (err.code === '42501') {
+      throw new Error(
+        `The Postgres authStore contract run needs its own database and could not create one: ` +
+          `the role in TEST_DATABASE_URL lacks CREATEDB. Either grant it, or create an EMPTY ` +
+          `database named "${name}" by hand (this run will adopt an empty one and manage it ` +
+          `from then on), or unset TEST_DATABASE_URL to skip the Postgres runs entirely. ` +
+          `It needs a separate database because it and downloadsStore.pg.test.js both clear ` +
+          `\`users\`, and node:test runs test files in parallel.`,
+      );
+    }
+    throw err;
+  } finally {
+    await adminPool.end();
+  }
+}
+
+// Decide whether we may TRUNCATE this database, and refuse if we may not.
+//
+// Without this check, swallowing 42P04 means silently adopting — and clearing —
+// a pre-existing `<name>_authstore` that the operator never pointed us at and
+// may well care about. TEST_DATABASE_URL's "never a real database" warning only
+// covers the database it NAMES; the sibling is one this file invented, so it has
+// to earn the right to destroy it rather than assume it.
+//
+// A database is ours if we just created it, or if it carries our marker table,
+// or if it is empty (which is what hand-provisioning for the no-CREATEDB path
+// above leaves behind). Anything else — a database with tables but no marker —
+// is someone else's, and we stop.
+async function adoptOrRefuse(name, created) {
+  if (!created) {
+    const { rows } = await pool.query(
+      `SELECT to_regclass($1) IS NOT NULL AS marked,
+              EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public') AS has_tables`,
+      [`public.${OWNER_MARKER}`],
+    );
+    if (!rows[0].marked && rows[0].has_tables) {
+      throw new Error(
+        `Refusing to use the existing database "${name}": this run TRUNCATEs it, but it was ` +
+          `not created by this test and carries no \`${OWNER_MARKER}\` marker table, so it is ` +
+          `someone else's data. Drop it (or point TEST_DATABASE_URL at a differently-named ` +
+          `database) and re-run.`,
+      );
+    }
+  }
+
+  // Reusing dbInit's applier rather than re-reading schema.sql means this run
+  // also inherits its column-drift assertion, so a schema.sql the test database
+  // can't satisfy fails here by name. The sibling database has its own `public`
+  // schema, which is where schema.sql's tables land and where that assertion
+  // looks — so the check stays meaningful here.
+  await applySchema(pool);
+  await pool.query(`CREATE TABLE IF NOT EXISTS ${OWNER_MARKER} (note text)`);
+}
+
+// Once per process.
 async function ensureDatabase() {
   if (!ready) {
     ready = (async () => {
       const { url, name } = deriveSiblingUrl(connectionString);
-
-      // Ended as soon as the CREATE lands: it is a one-shot connection to the
-      // database TEST_DATABASE_URL names, and that is the database
-      // `downloadsStore.pg.test.js` is concurrently working in — holding a
-      // connection open there for the rest of this run buys nothing.
-      const adminPool = new Pool({ connectionString, ssl: false, max: 1 });
-      try {
-        await adminPool.query(`CREATE DATABASE "${name}"`);
-      } catch (err) {
-        if (err.code !== '42P04') throw err;
-      } finally {
-        await adminPool.end();
-      }
-
+      const created = await createSiblingDatabase(name);
       pool = new Pool({ connectionString: url, ssl: false, max: POOL_MAX });
-
-      // Reusing dbInit's applier rather than re-reading schema.sql means this
-      // run also inherits its column-drift assertion, so a schema.sql the test
-      // database can't satisfy fails here by name. The sibling database has its
-      // own `public` schema, which is where schema.sql's tables land and where
-      // that assertion looks — so the check stays meaningful here.
-      await applySchema(pool);
+      await adoptOrRefuse(name, created);
     })();
   }
 

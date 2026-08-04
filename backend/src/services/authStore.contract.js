@@ -181,6 +181,12 @@ function runAuthStoreContract({ label, freshStore, skip = false }) {
     // here would fail the Postgres run for behaviour production handles.
     assert.equal(Number(found.max_storage_bytes), ALICE.max_storage_bytes);
 
+    // Only the Postgres run gives the next assertion teeth, and that asymmetry
+    // is worth naming rather than leaving to be discovered: `createMemoryStore`
+    // returns the seeded fixture object itself, so on the memory impl this pins
+    // the fixture's own keys and not any projection. Same shape as the
+    // concurrency case below — written for both, meaningful against one.
+    //
     // No column beyond the four is exposed — `created_at` is not part of the
     // session identity and must not ride along into the JWT payload.
     assert.deepEqual(Object.keys(found).sort(), ['email', 'id', 'max_storage_bytes', 'name']);
@@ -256,7 +262,19 @@ function runAuthStoreContract({ label, freshStore, skip = false }) {
   it('an expired token is refused, and stays refused', async () => {
     const store = await freshStore();
 
-    // The `expires_at > now()` half of the WHERE.
+    // The `expires_at > now()` half of the WHERE, which this kills when dropped
+    // or inverted.
+    //
+    // A minute past the deadline, NOT a millisecond. A tighter margin looks
+    // like a sharper boundary test and isn't: `expiresAt` is computed from the
+    // client clock and compared against the server's `now()`, so at 1ms any
+    // clock skew (a drifted VM, a container host) flips the result — flaky by
+    // construction, in the one direction that reads as a real failure. And it
+    // would buy nothing, because the only mutation a tight margin could catch
+    // that this doesn't is `>` widened to `>=`, which differs solely for a token
+    // expiring in the same microsecond the query reads the clock. That mutation
+    // was tried on 0XC-330 and survives — an equivalent mutant, not a gap. Don't
+    // narrow this margin or add a sleep chasing it.
     await store.insertLoginToken({
       tokenHash: hash('stale'),
       email: ALICE.email,
@@ -267,25 +285,6 @@ function runAuthStoreContract({ label, freshStore, skip = false }) {
     // Not a one-shot rejection that quietly marks it used and lets a retry
     // through — it is refused every time.
     assert.equal(await store.consumeLoginToken(hash('stale')), null);
-  });
-
-  it('expiry is exclusive — a token whose expires_at has just passed is refused', async () => {
-    const store = await freshStore();
-
-    // 1ms past the deadline — the tightest expression of "expired" both impls
-    // can agree on without a clock stub. It catches the comparison being
-    // dropped or inverted, but NOT `>` widened to `>=`: those differ only for a
-    // token expiring at the same microsecond the query reads the clock, which
-    // no test can arrange and no user can hit. That mutation was tried and
-    // survives (an equivalent mutant, recorded on 0XC-330) — don't add a sleep
-    // chasing it.
-    await store.insertLoginToken({
-      tokenHash: hash('boundary'),
-      email: ALICE.email,
-      expiresAt: new Date(Date.now() - 1),
-    });
-
-    assert.equal(await store.consumeLoginToken(hash('boundary')), null);
   });
 
   it('an unknown token hash consumes to null', async () => {
@@ -329,7 +328,16 @@ function runAuthStoreContract({ label, freshStore, skip = false }) {
     // so only hex ever reaches this argument) — which is exactly why the store
     // has to hold the line itself rather than inherit it from a caller that
     // could change.
-    for (const pattern of ['%', `${hash('a').slice(0, 6)}%`, hash('a').replace('-', '_')]) {
+    // Derived from the real hash rather than hard-coded, so these stay genuine
+    // patterns if `hash()` changes shape. The prefix deliberately drops the last
+    // TWO characters: `hash('a')` is exactly 6 long, so slicing to 6 was a no-op
+    // that made the "right-anchored prefix" case secretly test the whole hash
+    // plus `%` — still catching LIKE, but not via the case it appeared to be.
+    const live = hash('a');
+    const prefix = live.slice(0, -2);
+    assert.ok(prefix.length > 0 && prefix !== live, 'the prefix must be a real prefix');
+
+    for (const pattern of ['%', `${prefix}%`, live.replace('-', '_')]) {
       assert.equal(
         await store.consumeLoginToken(pattern),
         null,
