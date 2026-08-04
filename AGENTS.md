@@ -211,17 +211,27 @@ Linting and formatting are configured in the root `biome.json`:
 ### Prerequisites
 - Node.js 18+
 - yt-dlp installed system-wide (`brew install yt-dlp` on macOS)
+- ffmpeg installed system-wide (`brew install ffmpeg` on macOS) — required for every video+audio merge; without it `type: 'video'` downloads fail
 
 ### Key Frontend Dependencies
 - React 19, Vite 8
-- Axios (HTTP client)
+- React Router 7 (`createBrowserRouter`, in `main.jsx`)
+- No HTTP-client dependency — API calls use `apiFetch` (a `credentials: 'include'` wrapper over native `fetch`, in `src/lib/media.js`); SSE uses the browser's `EventSource`
 - Material Symbols via Google Fonts (icons — ligature `<span>`s, always `aria-hidden`; see CLAUDE.md's styling section)
+- Tailwind CSS is **not** a dependency — it loads from the runtime CDN, with the design tokens inline in `frontend/index.html` (see CLAUDE.md's styling section)
+- `@playwright/test` (dev, pinned exactly — it determines the browser build)
 
 ### Key Backend Dependencies
 - Express 4
+- pg (Postgres/Neon — per-user history, quotas, the `users` allowlist)
+- jsonwebtoken (session-cookie JWTs for magic-link login)
+- resend (magic-link email; unset key → link logged to the console)
+- dropbox (SDK for the Dropbox cloud-upload provider; Google Drive and OneDrive are hand-rolled over `fetch`)
 - helmet (security headers)
-- cors, morgan
+- cors, morgan, cookie-parser
+- dotenv
 - uuid
+- nodemon (dev — watch scope pinned in `backend/nodemon.json`)
 
 ## Environment Variables
 

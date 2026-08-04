@@ -37,19 +37,28 @@ tubekeep/
 
 ### Backend
 - **Node.js 18+** - Runtime environment
-- **Express.js** - Web framework
+- **Express 4** - Web framework
 - **yt-dlp** - Video downloading engine (CLI tool)
+- **ffmpeg** - Merges separate video + audio streams into mp4 (CLI tool)
+- **pg** - Postgres client (Neon; per-user history, quotas, and the `users` allowlist)
+- **jsonwebtoken** - Session-cookie JWTs for the magic-link login
+- **resend** - Transactional email for the magic link (unset key → link logged to the console)
+- **dropbox** - SDK for the Dropbox "Move to cloud" provider (Google Drive and OneDrive are hand-rolled over `fetch`)
 - **helmet** - Security headers
 - **cors** - Cross-origin resource sharing
 - **morgan** - HTTP request logging
+- **cookie-parser** - Reads the session cookie
+- **dotenv** - Loads `backend/.env`
 - **uuid** - Unique ID generation
 
 ### Frontend
-- **Vite 5+** - Build tool and dev server
-- **React 18** - UI library
-- **Axios** - HTTP client (for info fetch)
+- **Vite 8** - Build tool and dev server
+- **React 19** - UI library
+- **React Router 7** - Routing (`createBrowserRouter`)
+- **No HTTP-client dependency** - every API call goes through `apiFetch`, a thin `credentials: 'include'` wrapper over the browser's native `fetch` (`src/lib/media.js`); download progress uses the browser's `EventSource` (SSE)
 - **Material Symbols** (Google Fonts) - Icon library, rendered as ligature text in a `<span class="material-symbols-outlined">`
-- **CSS Modules** - Component styling
+- **Tailwind CSS via the runtime CDN** - Styling, with the whole Material Design 3 design-token theme declared inline in `frontend/index.html`. There is no Tailwind dependency, `tailwind.config.js`, or PostCSS in this repo — see CLAUDE.md → *Styling system — non-obvious* before changing a token.
+- **Playwright** - The a11y smoke suite (`frontend/test/a11y/`)
 
 ## Features
 
@@ -91,6 +100,26 @@ Before running the application, ensure you have:
    **Verify installation:**
    ```bash
    yt-dlp --version
+   ```
+
+3. **ffmpeg** installed on your system
+
+   Required for every video+audio merge (`type: 'video'` downloads are merged
+   to mp4). Without it, high-quality downloads fail.
+
+   **macOS:**
+   ```bash
+   brew install ffmpeg
+   ```
+
+   **Ubuntu/Debian:**
+   ```bash
+   sudo apt install ffmpeg
+   ```
+
+   **Verify installation:**
+   ```bash
+   ffmpeg -version
    ```
 
 ## Installation
@@ -324,7 +353,7 @@ pip install yt-dlp
 - Chrome/Firefox have the best video codec support
 
 ### "Failed to load media" error
-- The file may have been cleaned up (24-hour limit)
+- The media may have been expired by the cleanup sweep (1 hour, `MAX_FILE_AGE_HOURS`)
 - Re-download the video
 
 ### CORS errors
