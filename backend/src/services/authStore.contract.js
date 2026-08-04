@@ -25,6 +25,28 @@
 //
 // Ids are real UUIDs because `users.id` is a `uuid` column, and a Postgres
 // harness must seed those rows before any lookup (see `authStore.pg.test.js`).
+//
+// ## Known divergences — deliberately NOT asserted here
+//
+// Three inputs make the two impls behave differently. None is a contract case,
+// because no single assertion is true of both; they are recorded here so the
+// next person meets them in a comment rather than in a failing run they assume
+// they caused. Verified on 0XC-330, not inferred:
+//
+// - **`max_storage_bytes` representation** — node-postgres returns `bigint` as a
+//   STRING (it cannot promise every int8 fits a float64); memory returns the
+//   seeded number. Both consumers already coerce, so the projection case pins
+//   the numeric value. See the comment there.
+// - **A duplicate `tokenHash`** — pg raises `23505` (`token_hash` is the PK);
+//   memory silently overwrites the row, so a second insert reassigns the token
+//   to a different email. Unreachable in production: `authService` mints a fresh
+//   32-byte random token per request, so a collision means the RNG failed.
+// - **A malformed uuid into `findUserById`** — pg raises `22P02`; memory returns
+//   `null`. Also unreachable in production: the id comes from a JWT `sub` this
+//   server signed.
+//
+// If either of the last two ever becomes reachable, the fix is to converge the
+// IMPLS and then add the case — not to add a case that accepts both answers.
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
@@ -104,6 +126,35 @@ function runAuthStoreContract({ label, freshStore, skip = false }) {
     // or a LIKE.
     assert.equal(await store.findUserByEmail('alice@example.tes'), null);
     assert.equal(await store.findUserByEmail('alice@example.testt'), null);
+  });
+
+  it('findUserByEmail matches a SQL wildcard literally, never as a pattern', async () => {
+    const store = await freshStore();
+
+    // The case above says "equality, not a prefix or a LIKE" but cannot prove
+    // the LIKE half: neither near-miss carries a wildcard, so both still fail a
+    // pattern match and the assertion holds either way. Verified by mutation on
+    // 0XC-330 — rewriting the lookup as `lower(email) LIKE $1` passed every
+    // other case in this file.
+    //
+    // A pattern match here is an allowlist bypass: `%` selects an arbitrary
+    // real user, and `findUserByEmail` is the whole of the "is this address
+    // allowed to log in" decision AND the second half of `verifyMagicLink`
+    // (which feeds it the consumed token's stored email). Nothing upstream
+    // strips these characters — `requestMagicLink` only trims and lowercases.
+    for (const pattern of [
+      '%', // matches every row
+      '%@example.test', // matches both seeded identities
+      'alice@example%', // right-anchored prefix
+      '_lice@example.test', // single-character wildcard
+      'alice@example_test', // `_` standing in for the literal dot
+    ]) {
+      assert.equal(
+        await store.findUserByEmail(pattern),
+        null,
+        `${pattern} must be compared as a literal string, not interpreted`,
+      );
+    }
   });
 
   it('findUserByEmail projects the session identity columns', async () => {
@@ -237,6 +288,77 @@ function runAuthStoreContract({ label, freshStore, skip = false }) {
 
     // A forged or truncated link. Must be indistinguishable from a used one.
     assert.equal(await store.consumeLoginToken(hash('never-issued')), null);
+  });
+
+  it('an unknown hash does not fall back to consuming some other live token', async () => {
+    const store = await freshStore();
+    const expiresAt = new Date(Date.now() + 15 * MINUTE);
+    await store.insertLoginToken({ tokenHash: hash('a'), email: ALICE.email, expiresAt });
+    await store.insertLoginToken({ tokenHash: hash('b'), email: BOB.email, expiresAt });
+
+    // The case above runs against an EMPTY store, so it proves only that a miss
+    // returns null when there is nothing to hit — an impl that answered an
+    // unknown hash with "whatever live token is lying around" passed it, and
+    // passed every other case here too (verified by mutation on 0XC-330).
+    // That impl hands a session to anyone who guesses a URL. So the miss has to
+    // be asserted with live rows present, in a store holding both the oldest
+    // and the newest token so neither `ORDER BY` direction can satisfy it.
+    assert.equal(await store.consumeLoginToken(hash('never-issued')), null);
+
+    // And the miss must not have burnt them on the way past.
+    assert.equal(await store.consumeLoginToken(hash('a')), ALICE.email);
+    assert.equal(await store.consumeLoginToken(hash('b')), BOB.email);
+  });
+
+  it('consumeLoginToken matches a SQL wildcard literally, never as a pattern', async () => {
+    const store = await freshStore();
+    const expiresAt = new Date(Date.now() + 15 * MINUTE);
+    await store.insertLoginToken({ tokenHash: hash('a'), email: ALICE.email, expiresAt });
+
+    // The token-hash half of the same bug class the email lookup has above, and
+    // it survived every other case here too. `token_hash LIKE $1` turns a
+    // single `%` into "consume any live token and tell me whose it is" — a
+    // login as an arbitrary user with no link and no email.
+    //
+    // Not reachable through the route today (authService hashes the raw token,
+    // so only hex ever reaches this argument) — which is exactly why the store
+    // has to hold the line itself rather than inherit it from a caller that
+    // could change.
+    for (const pattern of ['%', `${hash('a').slice(0, 6)}%`, hash('a').replace('-', '_')]) {
+      assert.equal(
+        await store.consumeLoginToken(pattern),
+        null,
+        `${pattern} must be compared as a literal string, not interpreted`,
+      );
+    }
+
+    // Still live — no pattern attempt consumed it.
+    assert.equal(await store.consumeLoginToken(hash('a')), ALICE.email);
+  });
+
+  it('consumption is independent of the users table', async () => {
+    const store = await freshStore();
+    const expiresAt = new Date(Date.now() + 15 * MINUTE);
+
+    // `login_tokens` carries a bare `email` with no FK to `users`, and
+    // `verifyMagicLink` is a deliberate two-step: consume, THEN look the email
+    // up. So the store must return the email of a token whose user row is gone
+    // and let the caller's `findUserByEmail` be the one to refuse — adding a
+    // join here would make the two impls disagree (the memory one has no users
+    // to join against) while looking like a tightening. It also silently
+    // changes behaviour: a rejected token would stay UNUSED, so re-adding the
+    // user would bring an old link back to life.
+    await store.insertLoginToken({
+      tokenHash: hash('orphan'),
+      email: 'nobody@example.test',
+      expiresAt,
+    });
+
+    assert.equal(await store.consumeLoginToken(hash('orphan')), 'nobody@example.test');
+    // The refusal happens here instead, one call later.
+    assert.equal(await store.findUserByEmail('nobody@example.test'), null);
+    // And it was still spent, so the link cannot be replayed.
+    assert.equal(await store.consumeLoginToken(hash('orphan')), null);
   });
 
   it('consuming one token leaves every other token untouched', async () => {
