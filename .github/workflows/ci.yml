@@ -33,6 +33,32 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    # The one job that gets a database, and only so `downloadsStore.pg.test.js`
+    # can execute the SQL branch of `downloadsStore.js` — the impl production
+    # runs, which nothing else in the suite touches (0XC-110). Every other test
+    # injects `createMemoryStore()` and stays offline, so this service is
+    # additive: with `TEST_DATABASE_URL` unset (a laptop) that one file skips
+    # with a reason and the rest of the suite is unchanged.
+    #
+    # A throwaway container rather than a Neon branch: free, hermetic, no secret
+    # and nothing to clean up. The SQL here is plain Postgres with no
+    # Neon-specific features, so the fidelity is sufficient.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tubekeep_test
+        ports:
+          - 5432:5432
+        # Without the health gate the steps can start before Postgres accepts
+        # connections, and the run fails on a race rather than on a test.
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tubekeep_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v5
 
@@ -48,6 +74,10 @@ jobs:
 
       - name: Run backend test suite
         working-directory: backend
+        env:
+          # Read only by downloadsStore.pg.test.js, which TRUNCATEs `downloads`
+          # and `users` between cases — so it must never point at a real database.
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/tubekeep_test
         run: npm test
 
   # Named `build` here (there's no docker job in this workflow to collide with);

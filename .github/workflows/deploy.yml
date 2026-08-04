@@ -38,6 +38,24 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    # Mirrors ci.yml's `test` job, service and all — deploy.yml also fires on the
+    # daily scheduled rebuild and on workflow_dispatch, neither of which goes
+    # through a PR, so dropping the database here would silently stop covering
+    # the SQL branch on exactly those runs. See ci.yml for why it exists.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: tubekeep_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d tubekeep_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v5
 
@@ -53,6 +71,9 @@ jobs:
 
       - name: Run backend test suite
         working-directory: backend
+        env:
+          # Throwaway container only — downloadsStore.pg.test.js truncates it.
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/tubekeep_test
         run: npm test
 
   # Named `build-frontend` (not `build`) because the docker image build job
