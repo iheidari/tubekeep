@@ -1,7 +1,7 @@
 const { test } = require('node:test');
-const assert = require('node:assert/strict');
 
 const { createStore, createMemoryStore } = require('./downloadsStore');
+const { assertSameStoreSurface } = require('./storeSurface');
 const { runDownloadsStoreContract } = require('./downloadsStore.contract');
 
 // The memory implementation's run of the shared contract (0XC-110). It is the
@@ -28,18 +28,10 @@ runDownloadsStoreContract({
 // other until a route hit `undefined is not a function` in production.
 test('both implementations expose the same method set', () => {
   // createStore only needs *a* query function to be constructed; nothing here
-  // calls through to it.
-  const pg = createStore(async () => ({ rows: [], rowCount: 0 }));
-  const memory = createMemoryStore();
-
-  // `_rows` is the memory impl's declared test-only escape hatch, so the
-  // underscore prefix is what marks something as deliberately not part of the
-  // interface. Everything else has to match.
-  const methodsOf = (store) =>
-    Object.keys(store)
-      .filter((key) => !key.startsWith('_') && typeof store[key] === 'function')
-      .sort();
-
-  assert.deepEqual(methodsOf(memory), methodsOf(pg));
-  assert.ok(methodsOf(pg).length > 0, 'the interface is not empty');
+  // calls through to it. The assertion itself is shared with the repo's other
+  // two-impl store — see storeSurface.js for what it checks and why.
+  assertSameStoreSurface(
+    createStore(async () => ({ rows: [], rowCount: 0 })),
+    createMemoryStore(),
+  );
 });

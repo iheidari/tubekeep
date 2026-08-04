@@ -72,7 +72,8 @@ jobs:
       - name: Run backend test suite
         working-directory: backend
         env:
-          # Throwaway container only — downloadsStore.pg.test.js truncates it.
+          # Throwaway container only — the pg contract runs truncate it, and
+          # authStore.pg.test.js creates a sibling `<name>_authstore` database.
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/tubekeep_test
         run: npm test
 

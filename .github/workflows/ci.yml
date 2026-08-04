@@ -33,12 +33,13 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    # The one job that gets a database, and only so `downloadsStore.pg.test.js`
-    # can execute the SQL branch of `downloadsStore.js` — the impl production
-    # runs, which nothing else in the suite touches (0XC-110). Every other test
-    # injects `createMemoryStore()` and stays offline, so this service is
-    # additive: with `TEST_DATABASE_URL` unset (a laptop) that one file skips
-    # with a reason and the rest of the suite is unchanged.
+    # The one job that gets a database, and only so the pg contract runs —
+    # `downloadsStore.pg.test.js` (0XC-110) and `authStore.pg.test.js` (0XC-330)
+    # — can execute the SQL branch of their stores, the impls production runs,
+    # which nothing else in the suite touches. Every other test injects
+    # `createMemoryStore()` and stays offline, so this service is additive: with
+    # `TEST_DATABASE_URL` unset (a laptop) those files skip with a reason and the
+    # rest of the suite is unchanged.
     #
     # A throwaway container rather than a Neon branch: free, hermetic, no secret
     # and nothing to clean up. The SQL here is plain Postgres with no
@@ -75,8 +76,10 @@ jobs:
       - name: Run backend test suite
         working-directory: backend
         env:
-          # Read only by downloadsStore.pg.test.js, which TRUNCATEs `downloads`
-          # and `users` between cases — so it must never point at a real database.
+          # Read only by the two pg contract runs, which TRUNCATE between cases —
+          # so it must never point at a real database. authStore.pg.test.js also
+          # CREATEs a sibling `<name>_authstore` database off this URL, so the two
+          # files can't clear each other's rows under node:test's file parallelism.
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/tubekeep_test
         run: npm test
 
