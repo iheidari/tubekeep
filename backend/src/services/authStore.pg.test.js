@@ -72,7 +72,6 @@ function deriveSiblingUrl(base) {
   return { url: url.toString(), name: sibling };
 }
 
-let adminPool;
 let pool;
 let ready;
 
@@ -87,37 +86,38 @@ const POOL_MAX = CONCURRENT_CONSUMERS + 3;
 // first, since the database is deliberately left in place between runs (it is
 // truncated per case, so nothing leaks).
 async function ensureDatabase() {
-  if (ready) return ready;
+  if (!ready) {
+    ready = (async () => {
+      const { url, name } = deriveSiblingUrl(connectionString);
 
-  ready = (async () => {
-    const { url, name } = deriveSiblingUrl(connectionString);
+      // Ended as soon as the CREATE lands: it is a one-shot connection to the
+      // database TEST_DATABASE_URL names, and that is the database
+      // `downloadsStore.pg.test.js` is concurrently working in — holding a
+      // connection open there for the rest of this run buys nothing.
+      const adminPool = new Pool({ connectionString, ssl: false, max: 1 });
+      try {
+        await adminPool.query(`CREATE DATABASE "${name}"`);
+      } catch (err) {
+        if (err.code !== '42P04') throw err;
+      } finally {
+        await adminPool.end();
+      }
 
-    adminPool = new Pool({ connectionString, ssl: false, max: 1 });
-    try {
-      await adminPool.query(`CREATE DATABASE "${name}"`);
-    } catch (err) {
-      if (err.code !== '42P04') throw err;
-    }
+      pool = new Pool({ connectionString: url, ssl: false, max: POOL_MAX });
 
-    pool = new Pool({ connectionString: url, ssl: false, max: POOL_MAX });
-
-    // Reusing dbInit's applier rather than re-reading schema.sql means this run
-    // also inherits its column-drift assertion, so a schema.sql the test
-    // database can't satisfy fails here by name. The sibling database has its
-    // own `public` schema, which is where schema.sql's tables land and where
-    // that assertion looks — so the check stays meaningful here.
-    await applySchema(pool);
-  })();
+      // Reusing dbInit's applier rather than re-reading schema.sql means this
+      // run also inherits its column-drift assertion, so a schema.sql the test
+      // database can't satisfy fails here by name. The sibling database has its
+      // own `public` schema, which is where schema.sql's tables land and where
+      // that assertion looks — so the check stays meaningful here.
+      await applySchema(pool);
+    })();
+  }
 
   return ready;
 }
 
-// A clean database plus the contract's two seeded identities. `login_tokens` has
-// no FK to `users` (it carries a bare `email`), but both are truncated so a case
-// never inherits a token or a row from the previous one. CASCADE is required
-// because schema.sql also creates `downloads`, whose `user_id` references
-// `users` — that table is unused here and stays empty.
-// Force `CONCURRENT_CONSUMERS` real connections to exist before any test runs.
+// Force `CONCURRENT_CONSUMERS` real connections to exist before a case runs.
 //
 // This is load-bearing, not tuning. A `pg.Pool` opens connections lazily, so
 // firing N concurrent queries at a cold pool does NOT produce N concurrent
@@ -125,16 +125,13 @@ async function ensureDatabase() {
 // doing TCP + auth, and finishes ALL of its statements before their first one
 // lands. The contract's concurrency case then never races — verified by
 // mutation on 0XC-330, where a deliberately non-atomic read-then-write
-// `consumeLoginToken` passed it against a cold pool and only failed (handing a
-// session to every caller) once the connections were warmed. Warming turns the
-// one case that can only be proven against a real database from decorative back
-// into real coverage.
+// `consumeLoginToken` passed it against a cold pool, and only failed once the
+// connections were warmed.
 //
-// Cheap to repeat per case: after the first call these are idle connections
-// already in the pool, so it is N round-trips of `SELECT 1`. Done per-case
-// rather than once, because pg reaps connections idle past
-// `idleTimeoutMillis` (10s by default) and a slow suite would otherwise let the
-// pool go cold again between cases.
+// Cheap to repeat per case: after the first call these are already idle
+// connections in the pool, so it is N round-trips of `SELECT 1`. Per-case rather
+// than once, because pg reaps connections idle past `idleTimeoutMillis` (10s by
+// default) and a slow suite would otherwise let the pool go cold again.
 async function warmPool() {
   const clients = await Promise.all(
     Array.from({ length: CONCURRENT_CONSUMERS }, () => pool.connect()),
@@ -143,6 +140,11 @@ async function warmPool() {
   for (const client of clients) client.release();
 }
 
+// A clean database plus the contract's two seeded identities. `login_tokens` has
+// no FK to `users` (it carries a bare `email`), but both are truncated so a case
+// never inherits a token or a row from the previous one. CASCADE is required
+// because schema.sql also creates `downloads`, whose `user_id` references
+// `users` — that table is unused here and stays empty.
 async function freshStore() {
   await ensureDatabase();
   await warmPool();
@@ -162,9 +164,9 @@ async function freshStore() {
 
 runAuthStoreContract({ label: 'postgres', freshStore, skip });
 
-// Without this the process hangs on the open pools. No-op when the run skipped,
-// since nothing ever created one.
+// Without this the process hangs on the open pool. No-op when the run skipped,
+// since nothing ever created one. The admin pool needs no teardown here — it is
+// ended the moment the CREATE lands (see `ensureDatabase`).
 after(async () => {
   if (pool) await pool.end();
-  if (adminPool) await adminPool.end();
 });

@@ -35,11 +35,25 @@ test('both implementations expose the same method set', () => {
   // `_rows` is the memory impl's declared test-only escape hatch, so the
   // underscore prefix is what marks something as deliberately not part of the
   // interface. Everything else has to match.
-  const methodsOf = (store) =>
+  //
+  // Compares every public key, NOT just the function-valued ones: filtering on
+  // `typeof === 'function'` before comparing would wave through a non-function
+  // property added to one impl alone (the shape `_rows` already has, minus the
+  // exempting underscore), which is exactly the drift this test exists to catch.
+  // Method-ness is asserted separately, so "same keys, but one impl exposes a
+  // value where the other exposes a method" still fails. Kept identical to
+  // `authStore.test.js`'s guard (0XC-330) so the two can't drift apart.
+  const surfaceOf = (store) =>
     Object.keys(store)
-      .filter((key) => !key.startsWith('_') && typeof store[key] === 'function')
+      .filter((key) => !key.startsWith('_'))
       .sort();
 
-  assert.deepEqual(methodsOf(memory), methodsOf(pg));
-  assert.ok(methodsOf(pg).length > 0, 'the interface is not empty');
+  const surface = surfaceOf(pg);
+  assert.deepEqual(surfaceOf(memory), surface);
+  assert.ok(surface.length > 0, 'the interface is not empty');
+
+  for (const key of surface) {
+    assert.equal(typeof pg[key], 'function', `pg store's ${key} should be a method`);
+    assert.equal(typeof memory[key], 'function', `memory store's ${key} should be a method`);
+  }
 });

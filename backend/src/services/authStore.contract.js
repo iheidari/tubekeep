@@ -86,6 +86,11 @@ const CONCURRENT_CONSUMERS = 5;
 // any stable distinct string will do — these are labelled for readable diffs.
 const hash = (label) => `hash-${label}`;
 
+// A token that is comfortably live. Every case that is not ABOUT expiry wants
+// only "not expired", so the exact margin carries no meaning; the two cases that
+// do test the boundary build their Date inline, where the value is the point.
+const liveExpiry = () => new Date(Date.now() + 15 * MINUTE);
+
 /**
  * Register the whole contract against one implementation.
  *
@@ -199,7 +204,7 @@ function runAuthStoreContract({ label, freshStore, skip = false }) {
 
   it('a freshly inserted token consumes once, returning its email', async () => {
     const store = await freshStore();
-    const expiresAt = new Date(Date.now() + 15 * MINUTE);
+    const expiresAt = liveExpiry();
 
     await store.insertLoginToken({ tokenHash: hash('a'), email: ALICE.email, expiresAt });
 
@@ -208,7 +213,7 @@ function runAuthStoreContract({ label, freshStore, skip = false }) {
 
   it('a token is single-use — the second consume returns null', async () => {
     const store = await freshStore();
-    const expiresAt = new Date(Date.now() + 15 * MINUTE);
+    const expiresAt = liveExpiry();
     await store.insertLoginToken({ tokenHash: hash('a'), email: ALICE.email, expiresAt });
 
     assert.equal(await store.consumeLoginToken(hash('a')), ALICE.email);
@@ -220,7 +225,7 @@ function runAuthStoreContract({ label, freshStore, skip = false }) {
 
   it('concurrent consumption of one token yields exactly one winner', async () => {
     const store = await freshStore();
-    const expiresAt = new Date(Date.now() + 15 * MINUTE);
+    const expiresAt = liveExpiry();
     await store.insertLoginToken({ tokenHash: hash('race'), email: ALICE.email, expiresAt });
 
     // THE case this contract exists for. Every consumption is issued before any
@@ -292,7 +297,7 @@ function runAuthStoreContract({ label, freshStore, skip = false }) {
 
   it('an unknown hash does not fall back to consuming some other live token', async () => {
     const store = await freshStore();
-    const expiresAt = new Date(Date.now() + 15 * MINUTE);
+    const expiresAt = liveExpiry();
     await store.insertLoginToken({ tokenHash: hash('a'), email: ALICE.email, expiresAt });
     await store.insertLoginToken({ tokenHash: hash('b'), email: BOB.email, expiresAt });
 
@@ -312,7 +317,7 @@ function runAuthStoreContract({ label, freshStore, skip = false }) {
 
   it('consumeLoginToken matches a SQL wildcard literally, never as a pattern', async () => {
     const store = await freshStore();
-    const expiresAt = new Date(Date.now() + 15 * MINUTE);
+    const expiresAt = liveExpiry();
     await store.insertLoginToken({ tokenHash: hash('a'), email: ALICE.email, expiresAt });
 
     // The token-hash half of the same bug class the email lookup has above, and
@@ -338,7 +343,7 @@ function runAuthStoreContract({ label, freshStore, skip = false }) {
 
   it('consumption is independent of the users table', async () => {
     const store = await freshStore();
-    const expiresAt = new Date(Date.now() + 15 * MINUTE);
+    const expiresAt = liveExpiry();
 
     // `login_tokens` carries a bare `email` with no FK to `users`, and
     // `verifyMagicLink` is a deliberate two-step: consume, THEN look the email
@@ -363,7 +368,7 @@ function runAuthStoreContract({ label, freshStore, skip = false }) {
 
   it('consuming one token leaves every other token untouched', async () => {
     const store = await freshStore();
-    const expiresAt = new Date(Date.now() + 15 * MINUTE);
+    const expiresAt = liveExpiry();
     await store.insertLoginToken({ tokenHash: hash('a'), email: ALICE.email, expiresAt });
     await store.insertLoginToken({ tokenHash: hash('b'), email: BOB.email, expiresAt });
 
@@ -375,7 +380,7 @@ function runAuthStoreContract({ label, freshStore, skip = false }) {
 
   it('a re-requested link does not invalidate the outstanding one', async () => {
     const store = await freshStore();
-    const expiresAt = new Date(Date.now() + 15 * MINUTE);
+    const expiresAt = liveExpiry();
 
     // `requestMagicLink` inserts a row per request and never clears prior ones,
     // so a user who clicks "resend" then opens the FIRST email must still get
@@ -389,7 +394,7 @@ function runAuthStoreContract({ label, freshStore, skip = false }) {
 
   it('the email is returned exactly as it was stored', async () => {
     const store = await freshStore();
-    const expiresAt = new Date(Date.now() + 15 * MINUTE);
+    const expiresAt = liveExpiry();
 
     // `verifyMagicLink` feeds this straight back into `findUserByEmail`, which
     // lowercases for itself — so the store must not normalise here. Round-trip
@@ -402,4 +407,4 @@ function runAuthStoreContract({ label, freshStore, skip = false }) {
   });
 }
 
-module.exports = { runAuthStoreContract, USERS, ALICE, BOB, CONCURRENT_CONSUMERS };
+module.exports = { runAuthStoreContract, USERS, CONCURRENT_CONSUMERS };

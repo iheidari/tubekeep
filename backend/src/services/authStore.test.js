@@ -41,10 +41,11 @@ test('both implementations expose the same method set', () => {
       .filter((key) => !key.startsWith('_'))
       .sort();
 
-  assert.deepEqual(surfaceOf(memory), surfaceOf(pg));
-  assert.ok(surfaceOf(pg).length > 0, 'the interface is not empty');
+  const surface = surfaceOf(pg);
+  assert.deepEqual(surfaceOf(memory), surface);
+  assert.ok(surface.length > 0, 'the interface is not empty');
 
-  for (const key of surfaceOf(pg)) {
+  for (const key of surface) {
     assert.equal(typeof pg[key], 'function', `pg store's ${key} should be a method`);
     assert.equal(typeof memory[key], 'function', `memory store's ${key} should be a method`);
   }
