@@ -104,6 +104,12 @@ test('a `kept` row belonging to a different user still protects the directory �
 test('a store.keptIds() failure fails CLOSED — nothing is age-expired this sweep, not even the non-kept', async () => {
   const { id, dir } = makeOldDir();
   const brokenStore = {
+    // Satisfied so the stranded-reconcile (which now runs first, and fails
+    // closed the same way) completes trivially — keptIds must be the only
+    // thing failing here, or this stops testing what it names.
+    async downloadingIds() {
+      return [];
+    },
     async keptIds() {
       throw new Error('db unavailable');
     },
@@ -276,4 +282,68 @@ test('a lost completion write is healed before failStale can retire it as failed
   const row = await store.findForUser(id, USER);
   assert.equal(row.status, 'complete');
   assert.equal(row.size, 999);
+});
+
+test('a lost completion write is healed before the age sweep can delete the media that proves it (0XC-151)', async () => {
+  // The narrowed case 0XC-151 decided to close: the finished media is ALREADY
+  // older than MAX_FILE_AGE_HOURS the first time a sweep sees it. With the
+  // age-based expiry running first, this exact sweep would delete the
+  // directory, leave the reconcile nothing to read, and failStale would then
+  // record a download that actually succeeded as `failed`.
+  const id = crypto.randomUUID();
+  const dir = makeFinishedDir(id, { filename: 'video.mp4', contents: 'z'.repeat(555) });
+  const when = new Date(Date.now() - 2 * ONE_HOUR_MS); // past MAX_FILE_AGE_HOURS (1h)
+  fs.utimesSync(dir, when, when);
+
+  const store = createMemoryStore();
+  await store.insert({
+    downloadId: id,
+    userId: USER,
+    url: 'https://example.com/watch?v=z',
+    filesize: 1, // deliberately stale — the reconcile must read the real on-disk size
+  });
+  store._rows.get(id).created_at = new Date(Date.now() - 7 * ONE_HOUR_MS); // past failStale's 6h window
+
+  const result = await runCleanup(store);
+
+  const row = await store.findForUser(id, USER);
+  assert.equal(row.status, 'complete');
+  assert.equal(row.size, 555);
+  // The age sweep still ran, on the same pass — the media is genuinely gone.
+  // So this isn't passing because expiry was skipped; the reconcile simply got
+  // there first, which is the whole fix.
+  assert.ok(result.expiredIds.includes(id));
+  assert.equal(fs.existsSync(dir), false);
+});
+
+test('a failing stranded-reconcile fails CLOSED — no age expiry and no failStale that sweep', async () => {
+  // Same reasoning as the keptIds fail-closed case: with no trustworthy answer
+  // to "did this row actually finish?", deleting its media or retiring it as
+  // failed could both be wrong, and an hour's delay costs nothing.
+  const { id, dir } = makeOldDir();
+  let failStaleCalls = 0;
+  const brokenStore = {
+    async downloadingIds() {
+      throw new Error('db unavailable');
+    },
+    async keptIds() {
+      return [];
+    },
+    async expireMissing() {
+      return 0;
+    },
+    // Counted rather than thrown from: runCleanup catches everything in this
+    // block, so a throw here would be swallowed and the assertion vacuous.
+    async failStale() {
+      failStaleCalls++;
+      return 0;
+    },
+  };
+
+  const result = await runCleanup(brokenStore);
+
+  assert.equal(result.expiredIds.includes(id), false);
+  assert.equal(fs.existsSync(dir), true);
+  assert.equal(failStaleCalls, 0);
+  assert.equal(result.errors.length, 0);
 });
