@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useResumePosition } from '../hooks/useResumePosition'
 import { fileUrl, mediaKind } from '../lib/media'
 import { PlayerContext } from './playerContext.js'
+import { useAuth } from './useAuth.js'
 
 // Build the player's view of a download. `download` comes from history/cold-lookup.
+// `sourceKey` rides along for resume only (see lib/resume's resumeKey).
 function toTrack(download, apiUrl) {
   return {
     downloadId: download.downloadId,
+    sourceKey: download.sourceKey || null,
     title: download.title,
     filename: download.filename,
     isAudio: mediaKind(download) === 'audio',
@@ -15,6 +19,13 @@ function toTrack(download, apiUrl) {
 }
 
 export function PlayerProvider({ children }) {
+  // Resume positions are namespaced per identity (see lib/resume), so the
+  // player needs to know who's watching. `loading` matters as much as `user`:
+  // reading or writing before /api/auth/me settles would file the position
+  // under `anon` and lose it.
+  const { user, loading: authLoading } = useAuth()
+  const authEmail = user?.email || null
+
   // The ONE media element. Rendered once below and physically moved between
   // hosts with appendChild — moving a node never resets playback, so audio/video
   // keeps going across route changes. Remounting (what the router does to pages)
@@ -35,6 +46,16 @@ export function PlayerProvider({ children }) {
   // rate is mirrored here and reapplied on loadedmetadata (see below). A ref
   // holds it for the metadata listener, whose effect runs once with no deps.
   const rateRef = useRef(1)
+
+  // Where playback left off last time (0XC-462). It owns which track is loaded
+  // (`begin`/`release`), so this provider keeps no mirror of `current` in a ref.
+  const {
+    begin: beginResume,
+    release: releaseResume,
+    save: saveResume,
+    restore: restoreResume,
+    forget: forgetResume,
+  } = useResumePosition({ mediaRef, email: authEmail, ready: !authLoading })
 
   // Move the element to the most specific mounted host (stage > dock > home).
   const placeMedia = useCallback(() => {
@@ -91,12 +112,20 @@ export function PlayerProvider({ children }) {
     const media = mediaRef.current
     if (!media) return
     const onPlay = () => setIsPlaying(true)
-    const onPause = () => setIsPlaying(false)
-    const onTime = () => setCurrentTime(media.currentTime || 0)
+    const onPause = () => {
+      setIsPlaying(false)
+      saveResume()
+    }
+    const onTime = () => {
+      setCurrentTime(media.currentTime || 0)
+      saveResume({ throttled: true })
+    }
+    const onEnded = () => forgetResume()
     const onMeta = () => {
       setDuration(media.duration || 0)
       // A fresh source starts at 1×; restore the user's chosen rate.
       media.playbackRate = rateRef.current
+      restoreResume()
     }
     // Trust the element's own MediaError: it's set on a real failure (e.g. an
     // expired file 404ing) and cleared by load() on teardown, so this shows the
@@ -108,6 +137,7 @@ export function PlayerProvider({ children }) {
     media.addEventListener('play', onPlay)
     media.addEventListener('pause', onPause)
     media.addEventListener('timeupdate', onTime)
+    media.addEventListener('ended', onEnded)
     media.addEventListener('loadedmetadata', onMeta)
     media.addEventListener('durationchange', onMeta)
     media.addEventListener('error', onError)
@@ -115,22 +145,35 @@ export function PlayerProvider({ children }) {
       media.removeEventListener('play', onPlay)
       media.removeEventListener('pause', onPause)
       media.removeEventListener('timeupdate', onTime)
+      media.removeEventListener('ended', onEnded)
       media.removeEventListener('loadedmetadata', onMeta)
       media.removeEventListener('durationchange', onMeta)
       media.removeEventListener('error', onError)
     }
-  }, [])
+  }, [saveResume, restoreResume, forgetResume])
 
-  const playTrack = useCallback((download, apiUrl) => {
-    const track = toTrack(download, apiUrl)
-    setCurrent((prev) => {
-      if (prev?.downloadId === track.downloadId) return prev
-      return track
-    })
-    setLoadError(false)
-  }, [])
+  // The other half of the restore race: metadata may already have landed by the
+  // time /api/auth/me answers, in which case this is the attempt that wins.
+  useEffect(() => {
+    if (!authLoading) restoreResume()
+  }, [authLoading, restoreResume])
+
+  const playTrack = useCallback(
+    (download, apiUrl) => {
+      const track = toTrack(download, apiUrl)
+      // `beginResume` owns "which track is loaded", so it answers whether this
+      // is actually a new one — and flushes the outgoing position before the
+      // element's `src` swaps out from under it.
+      if (beginResume(track)) setCurrent(track)
+      setLoadError(false)
+    },
+    [beginResume],
+  )
 
   const closePlayer = useCallback(() => {
+    // Before `load()` below: that fires `durationchange`, which would otherwise
+    // re-enter the restore path against a track we're in the middle of dropping.
+    releaseResume()
     const media = mediaRef.current
     if (media) {
       media.pause()
@@ -142,7 +185,7 @@ export function PlayerProvider({ children }) {
     setCurrentTime(0)
     setDuration(0)
     setLoadError(false)
-  }, [])
+  }, [releaseResume])
 
   const togglePlay = useCallback(() => {
     const media = mediaRef.current
