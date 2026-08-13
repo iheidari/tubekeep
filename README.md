@@ -69,7 +69,7 @@ tubekeep/
 - **In-browser Player**: Stream videos directly in the browser
 - **Download History**: View, play, and manage previous downloads — stored per-user in Postgres, so it follows your account across devices
 - **Per-user Storage Quota**: Each account has a `max_storage_bytes` allowance (default 5 GB, `-1` = unlimited) enforced before a download starts
-- **Auto-cleanup**: Files automatically expired 1 hour after download (`MAX_FILE_AGE_HOURS`)
+- **You Decide When Files Go**: Nothing is deleted on a timer — a download stays until you delete it, move it to your cloud, or replace it with a re-download. Your quota is what bounds disk use
 - **Unicode Support**: Handles filenames with special characters (Arabic, Persian, etc.)
 - **Responsive Design**: Works on desktop and mobile devices
 
@@ -206,13 +206,18 @@ VITE_API_URL=http://localhost:3001
 
 ### Download Cleanup
 
-Media files are automatically *expired* after **1 hour** (the history row survives,
-so the download can be repeated; it stops counting against your quota). To adjust:
+**Nothing expires on a timer.** A download's media stays on the server until
+someone acts on it: you delete it (default = *expire*, keeping the history row so
+it can be re-downloaded), you move it to your cloud, or a fresh download of the
+same video supersedes it. What bounds disk use is the **per-user quota**
+(`users.max_storage_bytes`, default 5 GB) — hit it and the next download is
+refused with a `507` until you free space.
 
-Edit `backend/src/services/cleanup.js`:
-```javascript
-const MAX_FILE_AGE_HOURS = 1;  // Change to desired hours
-```
+An hourly sweep (`backend/src/services/cleanup.js`) still runs, but it only
+reconciles the `downloads` table against the filesystem: healing rows whose
+completion write was lost, marking rows whose media went missing as expired, and
+retiring (plus cleaning up after) downloads a restart stranded mid-flight. It
+never removes the media of a download that succeeded.
 
 ## API Endpoints
 
@@ -233,7 +238,6 @@ Content-Type: application/json
   "type": "combined",
   "title": "Video Title",
   "thumbnail": "https://...",
-  "keep": false,
   "filesize": 12345678
 }
 ```
@@ -353,7 +357,7 @@ pip install yt-dlp
 - Chrome/Firefox have the best video codec support
 
 ### "Failed to load media" error
-- The media may have been expired by the cleanup sweep (1 hour, `MAX_FILE_AGE_HOURS`)
+- The media may have been deleted (by you, or superseded by a re-download of the same video) or moved to a cloud account
 - Re-download the video
 
 ### CORS errors

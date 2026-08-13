@@ -204,23 +204,6 @@ export function HistoryProvider({ children }) {
     }
   }, [])
 
-  const setKept = useCallback(async (downloadId, kept) => {
-    // Optimistic update; revert on failure.
-    setHistory((prev) => prev.map((d) => (d.downloadId === downloadId ? { ...d, kept } : d)))
-    try {
-      const response = await apiFetch(`${HISTORY_API_URL}/api/files/${downloadId}?kept=${kept}`, {
-        method: 'PATCH',
-      })
-      const data = await response.json()
-      if (!data.success) throw new Error(data.error)
-    } catch (err) {
-      console.error('❌ Keep toggle error:', err)
-      setHistory((prev) =>
-        prev.map((d) => (d.downloadId === downloadId ? { ...d, kept: !kept } : d)),
-      )
-    }
-  }, [])
-
   const findById = useCallback((downloadId) => {
     return historyRef.current.find((d) => d.downloadId === downloadId) || null
   }, [])
@@ -247,7 +230,6 @@ export function HistoryProvider({ children }) {
       forgetDownload,
       cancelDownload,
       removeDownload,
-      setKept,
       findById,
       markMoved,
     }),
@@ -260,7 +242,6 @@ export function HistoryProvider({ children }) {
       forgetDownload,
       cancelDownload,
       removeDownload,
-      setKept,
       findById,
       markMoved,
     ],

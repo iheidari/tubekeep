@@ -1,23 +1,5 @@
-import { useEffect, useState } from 'react'
 import { useCloudMove } from '../hooks/useCloudMove'
 import { useDismissableMenu } from '../hooks/useDismissableMenu'
-import { FILE_EXPIRY_MS } from '../lib/media'
-
-// A move must have at least this much runway before the file's expiry, so it
-// can't be started only to have the hourly cleanup yank the source mid-upload.
-const MOVE_CUTOFF_MS = 15 * 60 * 1000
-
-// ms of runway left before this file is too close to expiry to safely move.
-function moveRunwayMs(download) {
-  if (!download?.createdAt) return Number.POSITIVE_INFINITY
-  const createdAt = new Date(download.createdAt).getTime()
-  if (Number.isNaN(createdAt)) return Number.POSITIVE_INFINITY
-  return createdAt + FILE_EXPIRY_MS - Date.now()
-}
-
-// Id linking the "expiring soon" reason to its button via aria-describedby —
-// same pairing FormatSelector uses for its own aria-disabled reason.
-const expiringSoonId = (downloadId) => `expiring-soon-${downloadId}`
 
 // "Move to cloud" control for a completed download. Renders nothing when the
 // server hasn't configured any cloud provider. A single button opens a provider
@@ -28,7 +10,6 @@ function MoveToCloud({ download, downloadHref, onMoved }) {
   const { providers, phase, progress, error, activeProvider, move } = useCloudMove(download, {
     onMoved,
   })
-  const [, setTick] = useState(0)
   const {
     open,
     rootRef,
@@ -41,45 +22,9 @@ function MoveToCloud({ download, downloadHref, onMoved }) {
     getItemProps,
   } = useDismissableMenu(providers?.length ?? 0)
 
-  // Flip the button to "expiring soon" exactly when the runway crosses the
-  // cutoff, without polling — schedule a single re-render at that moment.
-  const runway = moveRunwayMs(download)
-  useEffect(() => {
-    const untilCutoff = runway - MOVE_CUTOFF_MS
-    if (!Number.isFinite(untilCutoff) || untilCutoff <= 0) return
-    const timer = setTimeout(() => setTick((v) => v + 1), untilCutoff + 500)
-    return () => clearTimeout(timer)
-  }, [runway])
-
   // Hidden until we know which providers are enabled (avoids a flash then
   // disappear), and when none are configured.
   if (providers === null || providers.length === 0) return null
-
-  // Too close to expiry to safely start a move — disable and nudge to download.
-  if (phase === 'idle' && runway < MOVE_CUTOFF_MS) {
-    return (
-      <div className="flex flex-col items-stretch gap-1 min-w-[9rem]">
-        <button
-          type="button"
-          aria-disabled="true"
-          title="This file is about to expire — download it to your device instead."
-          aria-describedby={expiringSoonId(download.downloadId)}
-          className="flex items-center justify-center gap-1 text-on-surface-variant/60 font-label-sm text-label-sm whitespace-nowrap border border-outline-variant px-3 py-1 rounded-full cursor-default"
-        >
-          <span className="material-symbols-outlined text-[16px]" aria-hidden="true">
-            cloud_off
-          </span>
-          Move to cloud
-        </button>
-        <span
-          id={expiringSoonId(download.downloadId)}
-          className="font-label-sm text-label-sm text-on-surface-variant/70 text-center"
-        >
-          Expiring soon
-        </span>
-      </div>
-    )
-  }
 
   if (phase === 'complete') {
     return (

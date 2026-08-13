@@ -4,14 +4,12 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const { execFileSync } = require('node:child_process');
 
 // Isolate this file's sweeps in a private DOWNLOADS_DIR (0XC-127): test files
-// run in parallel processes, and the age sweeps exercised here would otherwise
-// race other files' fixtures in the shared real downloads root (and vice
-// versa). Must be set BEFORE ./cleanup (→ ../utils/storage) is required, since
-// storage.js resolves the directory once at load time. The spawned CLI
-// subprocess below inherits this env too, so it sweeps the same sandbox.
+// run in parallel processes, and the directory removals exercised here would
+// otherwise race other files' fixtures in the shared real downloads root (and
+// vice versa). Must be set BEFORE ./cleanup (→ ../utils/storage) is required,
+// since storage.js resolves the directory once at load time.
 process.env.DOWNLOADS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tubekeep-cleanup-test-'));
 
 const { runCleanup } = require('./cleanup');
@@ -22,19 +20,8 @@ const ONE_HOUR_MS = 60 * 60 * 1000;
 const USER = '11111111-1111-1111-1111-111111111111';
 
 // Directories this file creates, removed even if an assertion throws so a
-// failed run never leaves debris in the real downloads root (same pattern as
-// utils/cleanupOldDownloads.test.js, which this exercises the caller of).
+// failed run never leaves debris behind.
 const created = [];
-
-function makeOldDir() {
-  const id = crypto.randomUUID();
-  const dir = ensureDownloadDir(id);
-  created.push(dir);
-  fs.writeFileSync(path.join(dir, 'video.mp4'), 'x');
-  const when = new Date(Date.now() - 2 * ONE_HOUR_MS);
-  fs.utimesSync(dir, when, when);
-  return { id, dir };
-}
 
 // A download whose job actually finished: a real directory holding only its
 // final media file — the exact shape downloadManager.js leaves behind right
@@ -47,11 +34,16 @@ function makeFinishedDir(downloadId, { filename = 'video.mp4', contents = 'x'.re
 }
 
 // A completed row matching an on-disk directory, the way a real download
-// leaves both behind.
-async function seedCompletedRow(store, id, { kept = false } = {}) {
+// leaves both behind. `ageMs` backdates both timestamps, since every window in
+// the sweep is measured from the row, never from the directory.
+async function seedCompletedRow(store, id, { ageMs = 0 } = {}) {
   await store.insert({ downloadId: id, userId: USER, url: `https://x/${id}`, filesize: 1 });
   await store.markComplete(id, { filename: 'video.mp4', filesize: 1 });
-  if (kept) await store.setKeptForUser(id, USER, true);
+  if (ageMs) {
+    const when = new Date(Date.now() - ageMs);
+    store._rows.get(id).created_at = when;
+    store._rows.get(id).completed_at = when;
+  }
 }
 
 afterEach(() => {
@@ -64,124 +56,84 @@ after(() => {
   fs.rmSync(process.env.DOWNLOADS_DIR, { recursive: true, force: true });
 });
 
-test('a `kept` download is never expired on disk, however old — the skip-set carries the store’s kept flag', async () => {
-  const { id, dir } = makeOldDir();
+// --- no expiry by age -------------------------------------------------------
+// Downloads are storage, not a transfer: media stays until its owner deletes
+// it, and disk is bounded by the per-user quota instead of a clock. The sweep
+// must therefore never remove the media of a download that succeeded, however
+// old it looks.
+
+test('a completed download is never expired by age, however old — the sweep only reconciles', async () => {
+  const id = crypto.randomUUID();
+  const dir = makeFinishedDir(id);
   const store = createMemoryStore();
-  await seedCompletedRow(store, id, { kept: true });
+  await seedCompletedRow(store, id, { ageMs: 100 * ONE_HOUR_MS });
 
-  const result = await runCleanup(store);
-
-  assert.equal(result.expiredIds.includes(id), false);
-  assert.equal(fs.existsSync(dir), true);
-  // The row itself is untouched — nothing reconciled it away either.
-  assert.equal((await store.findForUser(id, USER)).expired, false);
-});
-
-test('an old, non-kept download is expired on disk', async () => {
-  const { id, dir } = makeOldDir();
-  const store = createMemoryStore();
-  await seedCompletedRow(store, id, { kept: false });
-
-  const result = await runCleanup(store);
-
-  assert.ok(result.expiredIds.includes(id));
-  assert.equal(fs.existsSync(dir), false);
-});
-
-test('a `kept` row belonging to a different user still protects the directory — keptIds spans all users', async () => {
-  const { id, dir } = makeOldDir();
-  const store = createMemoryStore();
-  await store.insert({ downloadId: id, userId: 'other-user', url: 'https://x', filesize: 1 });
-  await store.markComplete(id, { filename: 'video.mp4', filesize: 1 });
-  await store.setKeptForUser(id, 'other-user', true);
-
-  const result = await runCleanup(store);
-
-  assert.equal(result.expiredIds.includes(id), false);
-  assert.equal(fs.existsSync(dir), true);
-});
-
-test('a store.keptIds() failure fails CLOSED — nothing is age-expired this sweep, not even the non-kept', async () => {
-  const { id, dir } = makeOldDir();
-  const brokenStore = {
-    // Satisfied so the stranded-reconcile (which now runs first, and fails
-    // closed the same way) completes trivially — keptIds must be the only
-    // thing failing here, or this stops testing what it names.
-    async downloadingIds() {
-      return [];
-    },
-    async keptIds() {
-      throw new Error('db unavailable');
-    },
-  };
-
-  const result = await runCleanup(brokenStore);
-
-  // Deleting a `kept` download's media is irreversible; without a reliable
-  // kept list there's no way to tell which directories are safe to age out,
-  // so none of them are touched this pass — not just the ones that might be
-  // kept. The next successful sweep (an hour later) catches up.
-  assert.equal(result.expiredIds.includes(id), false);
-  assert.equal(fs.existsSync(dir), true);
-  assert.equal(result.errors.length, 0);
-});
-
-test('runCleanup() called with no store at all still expires by directory age — only a *failing* store fails closed, not a missing one', async () => {
-  // This is NOT the standalone `npm run cleanup` CLI (that entry point calls
-  // cleanupOldDownloads directly — see the CLI tests below); it's the
-  // defensive no-store path runCleanup() itself supports (startCleanupScheduler
-  // called without a store, as in some unit tests). Since keptIds() is never
-  // attempted here, canExpireByAge stays true — this is a different case from
-  // the fail-closed one above, where a store IS present but its query throws.
-  const { id, dir } = makeOldDir();
-
-  const result = await runCleanup(); // no store argument — must not throw
-
-  assert.ok(result.expiredIds.includes(id));
-  assert.equal(fs.existsSync(dir), false);
-});
-
-// --- the standalone `npm run cleanup` CLI (a real, separate process) -------
-// A one-shot `node src/services/cleanup.js` invocation has neither a store
-// (no `keptIds()`) nor a job registry (no `runningDownloadIds()` — that only
-// knows about jobs in *its own* process). With neither guard, it must use a
-// wider age threshold than the server sweep's 1h, or a live download running
-// in some OTHER process (the actual server) could have its directory deleted
-// out from under it for looking merely mtime-quiet within the first hour.
-
-test('the standalone CLI does not touch a 2h-old directory — inside the server sweep window but not its own', () => {
-  const { dir } = makeOldDir(); // 2h old, per makeOldDir's fixed age
-
-  execFileSync('node', ['src/services/cleanup.js'], { cwd: path.join(__dirname, '../..') });
+  await runCleanup(store);
 
   assert.equal(fs.existsSync(dir), true);
+  const row = await store.findForUser(id, USER);
+  assert.equal(row.expired, false);
+  assert.equal(row.status, 'complete');
 });
 
-test('the standalone CLI still reclaims a directory old enough to be unambiguous debris (7h)', () => {
+test('an old, empty directory is left alone too — nothing on disk is aged out', async () => {
+  // Every path that abandons a download (failure, cancel) removes its whole
+  // directory already, so an empty one is not evidence of anything the sweep
+  // should act on — and acting on it by age is exactly what was removed.
   const id = crypto.randomUUID();
   const dir = ensureDownloadDir(id);
   created.push(dir);
-  fs.writeFileSync(path.join(dir, 'video.mp4'), 'x');
-  const when = new Date(Date.now() - 7 * ONE_HOUR_MS);
+  // No code path reads mtime any more (getDownloadDir stopped stat-ing), so
+  // backdating is deliberately inert here — it's the bait a reintroduced age
+  // sweep would take, which is the regression this guards.
+  const when = new Date(Date.now() - 100 * ONE_HOUR_MS);
   fs.utimesSync(dir, when, when);
 
-  execFileSync('node', ['src/services/cleanup.js'], { cwd: path.join(__dirname, '../..') });
+  await runCleanup(createMemoryStore());
 
-  assert.equal(fs.existsSync(dir), false);
+  assert.equal(fs.existsSync(dir), true);
 });
 
-test('a fresh download — kept or not — is left alone', async () => {
+test('runCleanup() with no store at all does not throw and touches no media', async () => {
+  // The defensive no-store path runCleanup() supports (startCleanupScheduler
+  // called without one, as in some unit tests). Every reconcile step is a
+  // table operation, so there is nothing left for it to do but prune jobs.
   const id = crypto.randomUUID();
-  const dir = ensureDownloadDir(id);
-  created.push(dir);
-  fs.writeFileSync(path.join(dir, 'video.mp4'), 'x');
-  const store = createMemoryStore();
-  await seedCompletedRow(store, id, { kept: false });
+  const dir = makeFinishedDir(id);
 
-  const result = await runCleanup(store);
+  const result = await runCleanup();
 
-  assert.equal(result.expiredIds.includes(id), false);
   assert.equal(fs.existsSync(dir), true);
+  assert.equal(result.expiredRows, 0);
+  assert.deepEqual(result.failedIds, []);
+});
+
+// --- expireMissing ----------------------------------------------------------
+// With no age sweep, this only catches media that went away by some route
+// outside the app — a manual rm, a lost volume, a half-finished delete.
+
+test('a completed row whose media vanished from disk is marked expired', async () => {
+  const id = crypto.randomUUID();
+  const store = createMemoryStore();
+  // No directory at all: seeded as complete, then the files went away.
+  await seedCompletedRow(store, id, { ageMs: 2 * ONE_HOUR_MS });
+
+  await runCleanup(store);
+
+  assert.equal((await store.findForUser(id, USER)).expired, true);
+});
+
+test('a just-completed row is inside the grace window and is not expired', async () => {
+  // A download that finishes *while* the sweep runs is missing from the
+  // directory snapshot it compares against, so without the grace window it
+  // would be expired the moment it landed.
+  const id = crypto.randomUUID();
+  const store = createMemoryStore();
+  await seedCompletedRow(store, id); // completed just now, no directory
+
+  await runCleanup(store);
+
+  assert.equal((await store.findForUser(id, USER)).expired, false);
 });
 
 // --- the stranded-download reconcile (0XC-120) ------------------------------
@@ -220,7 +172,7 @@ test('a stranded downloading row with no finished media is still retired as fail
   // No directory at all — a restart stranded the row before anything landed.
   const store = createMemoryStore();
   await store.insert({ downloadId: id, userId: USER, filesize: 100 });
-  store._rows.get(id).created_at = new Date(Date.now() - 7 * 60 * 60 * 1000); // past the 6h window
+  store._rows.get(id).created_at = new Date(Date.now() - 7 * ONE_HOUR_MS); // past the 6h window
 
   await runCleanup(store);
 
@@ -239,12 +191,31 @@ test('a stranded downloading row whose directory holds only a partial file is no
 
   const store = createMemoryStore();
   await store.insert({ downloadId: id, userId: USER, filesize: 100 });
-  store._rows.get(id).created_at = new Date(Date.now() - 7 * 60 * 60 * 1000); // past the 6h window
+  store._rows.get(id).created_at = new Date(Date.now() - 7 * ONE_HOUR_MS); // past the 6h window
 
   await runCleanup(store);
 
   const row = await store.findForUser(id, USER);
   assert.equal(row.status, 'failed');
+});
+
+test('failStale also removes the partial files the crashed job left behind', async () => {
+  // Nothing else ever reaches those bytes: a failed row renders as a dismissable
+  // card with no media, and it is excluded from the quota — so with no age
+  // sweep left to reclaim it, a killed download would leak disk permanently.
+  const id = crypto.randomUUID();
+  const dir = ensureDownloadDir(id);
+  created.push(dir);
+  fs.writeFileSync(path.join(dir, 'video.mp4.part'), 'x'.repeat(5000));
+
+  const store = createMemoryStore();
+  await store.insert({ downloadId: id, userId: USER, filesize: 100 });
+  store._rows.get(id).created_at = new Date(Date.now() - 7 * ONE_HOUR_MS);
+
+  const result = await runCleanup(store);
+
+  assert.deepEqual(result.failedIds, [id]);
+  assert.equal(fs.existsSync(dir), false);
 });
 
 test('a recent downloading row is untouched by either step', async () => {
@@ -264,9 +235,10 @@ test('a lost completion write is healed before failStale can retire it as failed
   // The exact scenario 0XC-120 describes: the job finished (the file is on
   // disk), but the completion hook's DB write failed, so the row is stuck
   // `downloading` — and old enough that failStale would otherwise claim it in
-  // the very same sweep. The reconcile step must win that race.
+  // the very same sweep, deleting the finished media along with it. The
+  // reconcile step must win that race.
   const id = crypto.randomUUID();
-  makeFinishedDir(id, { filename: 'audio.m4a', contents: 'y'.repeat(999) });
+  const dir = makeFinishedDir(id, { filename: 'audio.m4a', contents: 'y'.repeat(999) });
 
   const store = createMemoryStore();
   await store.insert({
@@ -275,59 +247,28 @@ test('a lost completion write is healed before failStale can retire it as failed
     url: 'https://example.com/watch?v=y',
     filesize: 1,
   });
-  store._rows.get(id).created_at = new Date(Date.now() - 7 * 60 * 60 * 1000); // also past failStale's window
+  store._rows.get(id).created_at = new Date(Date.now() - 7 * ONE_HOUR_MS); // past failStale's window
 
   await runCleanup(store);
 
   const row = await store.findForUser(id, USER);
   assert.equal(row.status, 'complete');
   assert.equal(row.size, 999);
+  assert.equal(fs.existsSync(dir), true);
 });
 
-test('a lost completion write is healed before the age sweep can delete the media that proves it (0XC-151)', async () => {
-  // The narrowed case 0XC-151 decided to close: the finished media is ALREADY
-  // older than MAX_FILE_AGE_HOURS the first time a sweep sees it. With the
-  // age-based expiry running first, this exact sweep would delete the
-  // directory, leave the reconcile nothing to read, and failStale would then
-  // record a download that actually succeeded as `failed`.
+test('a failing stranded-reconcile fails CLOSED — no failStale that sweep', async () => {
+  // With no trustworthy answer to "did this row actually finish?", recording it
+  // as failed and deleting the media that would have proved otherwise could
+  // both be wrong, and an hour's wait for the next sweep costs nothing.
   const id = crypto.randomUUID();
-  const dir = makeFinishedDir(id, { filename: 'video.mp4', contents: 'z'.repeat(555) });
-  const when = new Date(Date.now() - 2 * ONE_HOUR_MS); // past MAX_FILE_AGE_HOURS (1h)
-  fs.utimesSync(dir, when, when);
-
-  const store = createMemoryStore();
-  await store.insert({
-    downloadId: id,
-    userId: USER,
-    url: 'https://example.com/watch?v=z',
-    filesize: 1, // deliberately stale — the reconcile must read the real on-disk size
-  });
-  store._rows.get(id).created_at = new Date(Date.now() - 7 * ONE_HOUR_MS); // past failStale's 6h window
-
-  const result = await runCleanup(store);
-
-  const row = await store.findForUser(id, USER);
-  assert.equal(row.status, 'complete');
-  assert.equal(row.size, 555);
-  // The age sweep still ran, on the same pass — the media is genuinely gone.
-  // So this isn't passing because expiry was skipped; the reconcile simply got
-  // there first, which is the whole fix.
-  assert.ok(result.expiredIds.includes(id));
-  assert.equal(fs.existsSync(dir), false);
-});
-
-test('a failing stranded-reconcile fails CLOSED — no age expiry and no failStale that sweep', async () => {
-  // Same reasoning as the keptIds fail-closed case: with no trustworthy answer
-  // to "did this row actually finish?", deleting its media or retiring it as
-  // failed could both be wrong, and an hour's delay costs nothing.
-  const { id, dir } = makeOldDir();
+  const dir = ensureDownloadDir(id);
+  created.push(dir);
+  fs.writeFileSync(path.join(dir, 'video.mp4'), 'x');
   let failStaleCalls = 0;
   const brokenStore = {
     async downloadingIds() {
       throw new Error('db unavailable');
-    },
-    async keptIds() {
-      return [];
     },
     async expireMissing() {
       return 0;
@@ -336,14 +277,13 @@ test('a failing stranded-reconcile fails CLOSED — no age expiry and no failSta
     // block, so a throw here would be swallowed and the assertion vacuous.
     async failStale() {
       failStaleCalls++;
-      return 0;
+      return [];
     },
   };
 
   const result = await runCleanup(brokenStore);
 
-  assert.equal(result.expiredIds.includes(id), false);
-  assert.equal(fs.existsSync(dir), true);
   assert.equal(failStaleCalls, 0);
+  assert.equal(fs.existsSync(dir), true);
   assert.equal(result.errors.length, 0);
 });

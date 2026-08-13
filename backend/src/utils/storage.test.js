@@ -1,15 +1,25 @@
-const { test, afterEach } = require('node:test');
+const { test, afterEach, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
+
+// Isolate this file's fixtures in a private DOWNLOADS_DIR (0XC-127): test files
+// run in parallel processes, and the stray-directory fixture below would
+// otherwise be created in — and briefly visible to — the shared real downloads
+// root that other files sweep. Must be set BEFORE ./storage is required, since
+// storage.js resolves the directory once at load time.
+process.env.DOWNLOADS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tubekeep-storage-test-'));
 
 const {
   hasQuotaFor,
   remainingQuota,
   isUnlimitedQuota,
   UNLIMITED_QUOTA,
+  downloadsDir,
   getDownloadFileSize,
+  listDownloadDirs,
   ensureDownloadDir,
 } = require('./storage');
 
@@ -51,6 +61,10 @@ afterEach(() => {
   }
 });
 
+after(() => {
+  fs.rmSync(process.env.DOWNLOADS_DIR, { recursive: true, force: true });
+});
+
 test('getDownloadFileSize returns the real on-disk byte size', () => {
   const id = crypto.randomUUID();
   const dir = ensureDownloadDir(id);
@@ -85,4 +99,22 @@ test('getDownloadFileSize rejects a traversal-unsafe filename', () => {
 
   assert.equal(getDownloadFileSize(id, '../video.mp4'), null);
   assert.equal(getDownloadFileSize(id, '..%2Fvideo.mp4'), null);
+});
+
+// --- listDownloadDirs ---------------------------------------------------
+
+test('listDownloadDirs ignores non-UUID directory names', () => {
+  // The cleanup reconcile feeds these ids to a ::uuid[] parameter, so a stray
+  // directory name that reached it would abort the whole sweep with a cast
+  // error.
+  const stray = path.join(downloadsDir, 'not-a-download-id');
+  fs.mkdirSync(stray, { recursive: true });
+  created.push(stray);
+
+  const dirs = listDownloadDirs();
+
+  assert.equal(
+    dirs.some((d) => d.downloadId === 'not-a-download-id'),
+    false,
+  );
 });

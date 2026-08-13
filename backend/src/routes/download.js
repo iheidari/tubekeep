@@ -8,6 +8,7 @@ const {
   hasQuotaFor,
   remainingQuota,
   deleteDownload,
+  removeMediaFor,
   isValidDownloadId,
 } = require('../utils/storage');
 const { initSSE } = require('../utils/sse');
@@ -62,12 +63,9 @@ function formatBytes(bytes) {
 // hourly sweep reconciles anything left behind.
 async function supersedeOlderRows(store, { downloadId, userId, url, sourceKey }) {
   const superseded = await store.supersedeForUser({ downloadId, userId, url, sourceKey });
-  for (const id of superseded) {
-    try {
-      deleteDownload(id);
-    } catch (err) {
-      console.error(`⚠️  Could not remove superseded media ${id}: ${err.message}`);
-    }
+  const { errors } = removeMediaFor(superseded);
+  for (const { dir, error } of errors) {
+    console.error(`⚠️  Could not remove superseded media ${dir}: ${error}`);
   }
   if (superseded.length > 0) {
     console.log(`🧹 Superseded ${superseded.length} older download(s) for ${url}`);
@@ -89,7 +87,7 @@ function createDownloadRouter({ store, start = startJob }) {
   // body; the concurrency cap, the global disk backstop and the per-user storage
   // quota are all enforced here, before any job (or SSE) is created.
   router.post('/', async (req, res) => {
-    const { url, formatId, type, title, thumbnail, keep, filesize, sourceKey } = req.body;
+    const { url, formatId, type, title, thumbnail, filesize, sourceKey } = req.body;
     const userId = req.user.user_id;
     const resolvedSourceKey = isValidSourceKey(sourceKey) ? sourceKey : null;
 
@@ -109,7 +107,6 @@ function createDownloadRouter({ store, start = startJob }) {
 
     const downloadId = uuidv4();
     const resolvedType = type || 'video';
-    const kept = keep === true || keep === 'true';
 
     // The selected format's byte size. Untrusted (it comes from the client) and
     // only a UX guard, exactly like the disk check it feeds — the real size is
@@ -191,7 +188,6 @@ function createDownloadRouter({ store, start = startJob }) {
         thumbnail,
         type: resolvedType,
         filesize: hasWantBytes ? wantBytes : null,
-        kept,
         sourceKey: resolvedSourceKey,
       });
     } catch (err) {
@@ -208,7 +204,6 @@ function createDownloadRouter({ store, start = startJob }) {
           type: resolvedType,
           title,
           thumbnail,
-          keep: kept,
           sourceKey: resolvedSourceKey,
         },
         {

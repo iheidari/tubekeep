@@ -59,7 +59,6 @@ npm run preview   # Preview production build
 cd backend
 npm start         # Start with node
 npm run dev       # Start with nodemon (auto-reload)
-npm run cleanup   # Run cleanup service manually
 ```
 
 ### Linting & Formatting
@@ -262,7 +261,7 @@ This repo has agent skills installed in `.agents/skills/`:
 
 ## Important Notes
 
-- Media files are stored under `DOWNLOADS_DIR` (default `backend/downloads/`, configurable via env) and auto-expired after 1 hour (`MAX_FILE_AGE_HOURS`)
+- Media files are stored under `DOWNLOADS_DIR` (default `backend/downloads/`, configurable via env) and are **never** expired on a timer — they stay until the owner deletes them, moves them to their cloud, or a re-download supersedes them; the per-user quota is what bounds disk use
 - Download history lives in the Postgres `downloads` table, scoped to the session's user; each account has a storage quota (`users.max_storage_bytes`, default 5 GB, `-1` = unlimited) enforced at `POST /api/download`
 - Uses Server-Sent Events (SSE) for real-time download progress
 - CORS is pinned to `FRONTEND_URL` with credentials enabled (never a wildcard)

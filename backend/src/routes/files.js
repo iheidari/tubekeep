@@ -206,9 +206,11 @@ function createFilesRouter(requireAuth, { store }) {
     }
   });
 
-  // Toggle "keep forever". The `downloads` row is the only place this lives —
-  // the age-based cleanup sweep reads `kept` from the store (see
-  // services/cleanup.js), not from disk.
+  // Toggle "keep forever" on a row. VESTIGIAL: `kept` existed to exempt a
+  // download from the age-based cleanup sweep, and nothing expires by age any
+  // more — a download's media stays until its owner deletes it. The column and
+  // this endpoint are kept (no reader left, so no migration needed) in case a
+  // future feature wants a per-download pin; no UI calls it.
   router.patch('/:downloadId', async (req, res) => {
     const { downloadId } = req.params;
     const kept = req.query.kept === 'true';

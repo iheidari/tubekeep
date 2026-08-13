@@ -26,19 +26,6 @@ export function apiFetch(input, init = {}) {
   })
 }
 
-// How long a file lives on our server before it's expired (mirrors the backend
-// MAX_FILE_AGE_HOURS in services/cleanup.js). Exposed so the UI can gate
-// time-sensitive actions — e.g. don't start a cloud move that would race the
-// expiry cleanup.
-export const FILE_EXPIRY_MS = 60 * 60 * 1000
-
-// Human-readable form of FILE_EXPIRY_MS for UI copy, so the messaging can't
-// drift from the actual expiry window (e.g. '1 hour', '24 hours').
-export function fileExpiryLabel() {
-  const hours = Math.round(FILE_EXPIRY_MS / (60 * 60 * 1000))
-  return hours === 1 ? '1 hour' : `${hours} hours`
-}
-
 const AUDIO_RE = /\.(mp3|m4a|ogg|opus|wav|flac)$/i
 
 export function isAudioFile(filename) {
@@ -175,8 +162,8 @@ export function fileUrl(apiUrl, downloadId, filename, { download = false } = {})
 
 // Per-tab persistence of download start params: written when a download starts
 // (InfoPage) and read back if /download/:id is reloaded (DownloadPage) so the SSE
-// resumes and the "Keep forever" choice survives. One key format lives here so the
-// writer and reader can't drift.
+// resumes instead of losing router state. One key format lives here so the writer
+// and reader can't drift.
 const startKey = (downloadId) => `tk_start_${downloadId}`
 
 export function saveStartParams(downloadId, params) {
