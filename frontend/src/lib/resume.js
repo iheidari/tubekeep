@@ -13,28 +13,28 @@
 const KEY_PREFIX = 'tubekeepResume:'
 const ANON = 'anon'
 
-// Don't record a barely-started video…
-export const MIN_POSITION_SECONDS = 10
-// …and don't record (or restore) one that's effectively finished: resuming at
-// 59:58 of a 60:00 film ends playback instantly and forces the user to scrub
-// back — the worst outcome this feature can produce. The tail guard prevents it
-// even when `ended` never fires.
-export const MIN_TAIL_SECONDS = 15
+// Don't record a barely-started video — and, read the other way, this is the
+// window in which restoring a position is a welcome nudge rather than a jolt.
+const MIN_POSITION_SECONDS = 10
+// Don't record (or restore) one that's effectively finished: resuming at 59:58
+// of a 60:00 film ends playback instantly and forces the user to scrub back —
+// the worst outcome this feature can produce. The tail guard prevents it even
+// when `ended` never fires.
+const MIN_TAIL_SECONDS = 15
 // Bounded storage: ~50 entries is roughly 2KB, so `setItem` can't start
 // throwing on a full quota — which, being swallowed by the try/catch below,
 // would mean resume silently stops working forever with no symptom.
-export const MAX_ENTRIES = 50
-// Throttle for the periodic write during playback.
+const MAX_ENTRIES = 50
+// How often playback persists its position while it's running.
 export const SAVE_INTERVAL_MS = 5000
 
-// Which identity a track's position is filed under. `sourceKey` when the record
-// carries one — the half shared with `sharesSource` (lib/media.js) and the
-// backend's `supersedeForUser` — so a re-download (new `downloadId`, same
-// canonical video) keeps your place. The fallback differs from theirs on
-// purpose: they fall back to exact `url`, which a track doesn't carry, so this
-// falls back to `downloadId`. That's also what an anonymous /play/:id viewer
-// gets, since the public meta endpoint returns no `sourceKey`.
-export function resumeKey(track) {
+// Which key a track's position is filed under: `sourceKey` when the record
+// carries one, so a re-download (new `downloadId`, same canonical video) keeps
+// your place. The fallback differs from `sharesSource`'s (lib/media.js) exact
+// `url` on purpose — a track carries no url — and `downloadId` is also what an
+// anonymous /play/:id viewer gets, the public meta endpoint carrying no
+// `sourceKey`.
+function resumeKey(track) {
   return track?.sourceKey || track?.downloadId || null
 }
 
@@ -44,6 +44,9 @@ function storageKey(email) {
 
 // Every storage access is guarded: localStorage throws in private mode and on a
 // full quota, and resume must never be able to break playback.
+//
+// Re-reading before every write is deliberate, not redundant I/O — it merges
+// with whatever another tab has written since, which a cached map would clobber.
 function readMap(email) {
   try {
     const raw = localStorage.getItem(storageKey(email))
@@ -62,49 +65,55 @@ function writeMap(email, map) {
   }
 }
 
-// Keep only the `max` most recently updated entries. The LRU is the *only*
-// reaper: entries are never dropped when a download is deleted, expired or
-// moved to cloud, because outliving the media is the point — expire a film,
-// re-download it later, land back where you were.
-export function pruneEntries(map, max = MAX_ENTRIES) {
-  const entries = Object.entries(map).filter(
-    ([, e]) => Number.isFinite(e?.t) && Number.isFinite(e?.u),
+// Keep the `MAX_ENTRIES` most recently updated entries, dropping malformed ones
+// on the way through. The LRU is the *only* reaper: entries are never dropped
+// when a download is deleted, expired or moved to cloud, because outliving the
+// media is the point — expire a film, re-download it later, land back where you
+// were.
+function pruneEntries(map) {
+  return Object.fromEntries(
+    Object.entries(map)
+      .filter(([, e]) => Number.isFinite(e?.t) && Number.isFinite(e?.u))
+      .sort((a, b) => b[1].u - a[1].u)
+      .slice(0, MAX_ENTRIES),
   )
-  if (entries.length <= max) return Object.fromEntries(entries)
-  entries.sort((a, b) => b[1].u - a[1].u)
-  return Object.fromEntries(entries.slice(0, max))
 }
 
-// Is `time` worth remembering in a file of `duration` seconds? Used on the
-// write side as the save predicate and on the read side as the clamp — one
-// definition, so a position can never be stored that wouldn't be restored.
-export function isResumable(time, duration) {
+// Is `time` worth remembering in a file of `duration` seconds? The save
+// predicate and the read-side test are this one definition, so a position can
+// never be stored that wouldn't be restored.
+function isResumable(time, duration) {
   if (!Number.isFinite(time) || !Number.isFinite(duration) || duration <= 0) return false
   return time > MIN_POSITION_SECONDS && duration - time >= MIN_TAIL_SECONDS
 }
 
-// The saved position for `key`, or null when there is nothing to restore.
+// Where playback of `track` should pick up, or null for "leave it alone" — the
+// whole read-side decision, so the player only has to choose *when* to ask.
 // `duration` is this file's actual length: the same key can front two different
-// files (a 4K copy expired, an audio-only one re-downloaded), so a position
-// that isn't `MIN_TAIL_SECONDS` short of *this* file is ignored outright rather
-// than clamped — starting at 0 beats starting at the end.
-export function readPosition(email, key, duration) {
-  if (!key) return null
-  const entry = readMap(email)[key]
-  const time = Number(entry?.t)
+// files (a 4K copy expired, an audio-only one re-downloaded), so a position that
+// isn't `MIN_TAIL_SECONDS` short of *this* file is rejected outright rather than
+// clamped — starting at 0 beats starting at the end. `currentTime` makes a late
+// answer harmless: once the viewer is genuinely watching, nothing moves them.
+export function positionToSeek(email, track, { duration, currentTime }) {
+  const key = resumeKey(track)
+  // Negated rather than `>=` so an unknown (NaN) currentTime declines to seek.
+  if (!key || !(currentTime < MIN_POSITION_SECONDS)) return null
+  const time = Number(readMap(email)[key]?.t)
   return isResumable(time, duration) ? time : null
 }
 
 // Record where playback is. A position that fails the predicate is dropped on
 // the floor (not deleted): `ended` is what forgets a finished video.
-export function savePosition(email, key, time, duration) {
+export function savePosition(email, track, time, duration) {
+  const key = resumeKey(track)
   if (!key || !isResumable(time, duration)) return
   const map = readMap(email)
   map[key] = { t: time, u: Date.now() }
   writeMap(email, pruneEntries(map))
 }
 
-export function clearPosition(email, key) {
+export function clearPosition(email, track) {
+  const key = resumeKey(track)
   if (!key) return
   const map = readMap(email)
   if (!(key in map)) return
