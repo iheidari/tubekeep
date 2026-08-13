@@ -5,7 +5,7 @@ import { useHistory } from '../context/useHistory'
 import { useDownloadProgress } from '../hooks/useDownloadProgress'
 import { useShareLink } from '../hooks/useShareLink'
 import { providerLabel } from '../lib/cloud'
-import { fileExpiryLabel, fileUrl, formatFileSize, mediaKind } from '../lib/media'
+import { fileUrl, formatFileSize, mediaKind } from '../lib/media'
 
 const FILTERS = [
   { id: 'all', label: 'All' },
@@ -47,7 +47,7 @@ function formatRelative(dateString) {
   return `${years} year${years === 1 ? '' : 's'} ago`
 }
 
-function ActiveCard({ download, apiUrl, onDelete, onKeep }) {
+function ActiveCard({ download, apiUrl, onDelete }) {
   const { copied, share } = useShareLink(download.downloadId)
   const isAudio = mediaKind(download) === 'audio'
 
@@ -87,27 +87,6 @@ function ActiveCard({ download, apiUrl, onDelete, onKeep }) {
               {download.title}
             </h3>
             <div className="flex items-center gap-2 flex-shrink-0">
-              <button
-                type="button"
-                onClick={() => onKeep(download.downloadId, !download.kept)}
-                title={
-                  download.kept ? 'Kept — click to let it expire' : 'Keep this file from expiring'
-                }
-                className={
-                  download.kept
-                    ? 'flex items-center gap-1 text-on-primary font-label-sm text-label-sm whitespace-nowrap bg-primary px-2 py-0.5 rounded-full transition-colors active:scale-95'
-                    : 'flex items-center gap-1 text-primary font-label-sm text-label-sm whitespace-nowrap border border-primary px-2 py-0.5 rounded-full hover:bg-primary/5 transition-colors active:scale-95'
-                }
-              >
-                <span
-                  className="material-symbols-outlined text-[14px]"
-                  style={download.kept ? { fontVariationSettings: "'FILL' 1" } : undefined}
-                  aria-hidden="true"
-                >
-                  push_pin
-                </span>
-                {download.kept ? 'Kept' : 'Keep'}
-              </button>
               <span className="flex items-center gap-1 text-tertiary font-label-sm text-label-sm whitespace-nowrap bg-tertiary-fixed px-2 py-0.5 rounded-full">
                 <span
                   className="material-symbols-outlined text-[14px]"
@@ -591,8 +570,7 @@ function FailedCard({ download, onDismiss }) {
 }
 
 function DownloadsPage() {
-  const { history, expired, apiUrl, removeDownload, forgetDownload, setKept, cancelDownload } =
-    useHistory()
+  const { history, expired, apiUrl, removeDownload, forgetDownload, cancelDownload } = useHistory()
   const [filter, setFilter] = useState('all')
 
   const items = useMemo(() => {
@@ -610,8 +588,8 @@ function DownloadsPage() {
         <div>
           <h2 className="font-headline-lg text-headline-lg text-ink mb-2">Your downloads</h2>
           <p className="font-body-md text-body-md text-muted max-w-[52ch]">
-            Files clear from the server after {fileExpiryLabel()}. Pin one to keep it, or move it to
-            your cloud — expired files can be re-downloaded from the source.
+            Files stay here until you delete them. Free up space by deleting one or moving it to
+            your cloud — deleted files can be re-downloaded from the source.
           </p>
         </div>
         <div className="flex items-center gap-2 bg-surface-container-low p-1 rounded-lg">
@@ -670,7 +648,6 @@ function DownloadsPage() {
                 download={item}
                 apiUrl={apiUrl}
                 onDelete={removeDownload}
-                onKeep={setKept}
               />
             )
           })}

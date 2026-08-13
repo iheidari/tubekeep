@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { downloadBlockReason, formatDuration, formatFileSize, isUnlimitedQuota } from '../lib/media'
 import BackLink from './BackLink'
 
@@ -90,8 +89,6 @@ function FormatOption({
 }
 
 function FormatSelector({ info, onDownload, startingFormat = null, disk = null }) {
-  const [keep, setKeep] = useState(false)
-
   const quota = disk?.quota || null
   const unlimited = quota ? isUnlimitedQuota(quota.max) : false
   const usedPct =
@@ -226,40 +223,6 @@ function FormatSelector({ info, onDownload, startingFormat = null, disk = null }
         </div>
       </section>
 
-      {/* Keep-forever switch — applies to whichever format is downloaded next */}
-      <button
-        type="button"
-        role="switch"
-        aria-checked={keep}
-        onClick={() => setKeep((v) => !v)}
-        className="w-full mb-stack-md flex items-center gap-3.5 bg-surface border border-line rounded-xl px-4 py-3.5 text-left"
-      >
-        <span
-          className="material-symbols-outlined text-ink text-[22px]"
-          style={{ fontVariationSettings: "'FILL' 1, 'wght' 500" }}
-          aria-hidden="true"
-        >
-          push_pin
-        </span>
-        <span className="flex-1 min-w-0">
-          <span className="block font-semibold text-[14px] text-ink">Keep forever</span>
-          <span className="block text-[12.5px] text-muted">
-            Skip the 24-hour auto-cleanup for this download.
-          </span>
-        </span>
-        <span
-          className={`w-11 h-[26px] rounded-full relative flex-shrink-0 transition-colors ${
-            keep ? 'bg-pop' : 'bg-line2'
-          }`}
-        >
-          <span
-            className={`absolute top-[3px] w-5 h-5 rounded-full bg-surface transition-all ${
-              keep ? 'left-[21px]' : 'left-[3px]'
-            }`}
-          />
-        </span>
-      </button>
-
       {/* Your storage — the per-account quota that drives the disable check below.
           The server's own free disk is a second, separate backstop and isn't the
           user's business unless it actually blocks a format (see NoSpaceNote). */}
@@ -340,7 +303,7 @@ function FormatSelector({ info, onDownload, startingFormat = null, disk = null }
                         ? 'bg-fill text-on-fill'
                         : 'bg-surface text-ink border border-line2 hover:bg-tint'
                     }
-                    onGet={() => onDownload(format.formatId, format._type, keep, format.filesize)}
+                    onGet={() => onDownload(format.formatId, format._type, format.filesize)}
                   />
                 )
               })}
@@ -373,7 +336,7 @@ function FormatSelector({ info, onDownload, startingFormat = null, disk = null }
                     disk={disk}
                     startingFormat={startingFormat}
                     buttonClass="bg-surface text-ink border border-ink hover:bg-tint"
-                    onGet={() => onDownload(format.formatId, 'audio', keep, format.filesize)}
+                    onGet={() => onDownload(format.formatId, 'audio', format.filesize)}
                   />
                 )
               })}

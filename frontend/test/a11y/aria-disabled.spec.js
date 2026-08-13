@@ -10,6 +10,11 @@ import { expect, test } from './support/fixtures.js'
 // keyboard-focusable, and its aria-describedby actually resolves to non-empty
 // text. A dangling describedby id is the silent failure mode — the markup looks
 // correct and announces nothing.
+//
+// Both remaining call sites of the convention are covered here. MoveToCloud's
+// "expiring soon" case used to be the third; it went away with the age-based
+// cleanup sweep (downloads no longer expire on a timer). If a new
+// inactive-with-a-reason control appears, add it here.
 async function expectInactiveWithReason(page, button, label) {
   await expect(button, `${label} is marked aria-disabled`).toHaveAttribute('aria-disabled', 'true')
 
@@ -118,49 +123,5 @@ test.describe('inactive-with-a-reason controls', () => {
 
     await expectInactiveWithReason(page, get, "FormatSelector's Get button")
     await expect(page.getByText('Over your storage quota')).toHaveCount(1)
-  })
-
-  test('MoveToCloud: a download too close to expiry to move', async ({ page, hermetic }) => {
-    // Files expire 1h after creation and a move needs 15 min of runway, so a row
-    // created 50 min ago lands in the "expiring soon" branch.
-    const createdAt = new Date(Date.now() - 50 * 60 * 1000).toISOString()
-
-    await hermetic.prepare({
-      api: {
-        ...SIGNED_IN,
-        '**/api/files': {
-          status: 200,
-          body: {
-            success: true,
-            data: [
-              {
-                downloadId: 'abc-123',
-                title: 'An expiring video',
-                filename: 'video.mp4',
-                size: 1e6,
-                type: 'video',
-                url: 'https://www.youtube.com/watch?v=test123',
-                createdAt,
-                expired: false,
-                status: 'complete',
-              },
-            ],
-          },
-        },
-        // MoveToCloud renders nothing until at least one provider is configured.
-        '**/api/cloud/providers': {
-          status: 200,
-          body: { success: true, data: [{ name: 'dropbox', clientId: 'test-client-id' }] },
-        },
-      },
-    })
-
-    await page.goto('/downloads')
-
-    const move = page.getByRole('button', { name: /move to cloud/i })
-    await expect(move).toBeVisible()
-
-    await expectInactiveWithReason(page, move, "MoveToCloud's expiring-soon button")
-    await expect(page.getByText('Expiring soon')).toHaveCount(1)
   })
 })

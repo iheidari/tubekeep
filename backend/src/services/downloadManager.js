@@ -31,11 +31,18 @@ class DownloadCapError extends Error {
   }
 }
 
-// Ids of jobs currently running in THIS process. The cleanup sweep uses this to
-// never age out a directory a live job is still writing to — precise where the
-// old metadata-presence check was only a heuristic. In-memory only, so it can't
-// protect a job that was running before a restart (already a known gap —
-// sweepJobs/failStale exist because the registry doesn't survive one either).
+// Ids of jobs currently running in THIS process. The cleanup sweep's reconcile
+// step uses this to never mark a live job's row complete off a half-written
+// directory. In-memory only, so it can't protect a job that was running before a
+// restart (already a known gap — sweepJobs/failStale exist because the registry
+// doesn't survive one either).
+//
+// NOTE: the sweep's failStale step does NOT consult this. It doesn't need to
+// today — STALE_DOWNLOADING_MS (6h) is well past the ceiling on a single job
+// (DOWNLOAD_TIMEOUT_MS, 1h, × 3 attempts in ytdlp.js) — but that margin is the
+// only thing separating a live download from having its media deleted, since
+// failStale now removes the directories it retires. Raise the timeout or the
+// retry count, or put a queue in front of startJob, and this must be wired in.
 function runningDownloadIds() {
   const ids = [];
   for (const [id, job] of jobs) {
@@ -96,7 +103,7 @@ async function runHook(hook, arg, downloadId) {
 // terminal outcome through its emitter. Never throws — the terminal state is
 // captured on the job record so observers (current and future) can read it.
 async function runJob(job) {
-  const { downloadId, url, formatId, type, title, thumbnail, keep, sourceKey } = job.params;
+  const { downloadId, url, formatId, type, title, thumbnail, sourceKey } = job.params;
   const { signal } = job.abortController;
 
   const onProgress = (p) => {
@@ -116,8 +123,8 @@ async function runJob(job) {
       result = await downloadVideo(url, formatId, downloadId, onProgress, false, signal);
     }
 
-    // `type` and `keep` are already normalized by the route before startJob, so
-    // no re-defaulting/coercion is needed here. This shape (not persisted
+    // `type` is already normalized by the route before startJob, so no
+    // re-defaulting/coercion is needed here. This shape (not persisted
     // anywhere — the `downloads` row is the lifecycle record) only feeds the
     // SSE `complete` payload and the completion hook below.
     const metadata = {
@@ -133,7 +140,6 @@ async function runJob(job) {
       type,
       filename: result.filename,
       size: result.size,
-      kept: keep,
       createdAt: new Date().toISOString(),
       downloadId,
     };

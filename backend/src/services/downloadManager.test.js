@@ -73,7 +73,6 @@ function start(overrides = {}) {
     type: 'video',
     title: 'A video',
     thumbnail: null,
-    keep: false,
     ...overrides,
   });
 }
@@ -235,7 +234,6 @@ test('a completion hook that throws does not stop the job from reporting success
       type: 'video',
       title: 'A video',
       thumbnail: null,
-      keep: false,
     },
     {
       onComplete: () => {

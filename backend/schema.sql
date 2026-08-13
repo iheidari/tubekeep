@@ -61,6 +61,13 @@ CREATE TABLE IF NOT EXISTS downloads (
   expired_at  timestamptz,
   moved       boolean NOT NULL DEFAULT false,
   moved_info  jsonb,
+  -- VESTIGIAL. `kept` exempted a download from the age-based cleanup sweep, and
+  -- nothing expires by age any more — media stays until its owner removes it,
+  -- with the per-user quota bounding disk instead. Its reader (`keptIds()`) went
+  -- with the sweep and nothing writes it at download time; the column and
+  -- `setKeptForUser` / `PATCH /api/files/:id?kept=` survive only so no migration
+  -- is needed, and so a future per-download pin has somewhere to land. Every new
+  -- row is `false`.
   kept        boolean NOT NULL DEFAULT false,
   -- Namespaced extractor id (e.g. `youtube:dQw4w9WgXcQ`), used to match
   -- re-downloads by canonical video identity instead of the raw URL string

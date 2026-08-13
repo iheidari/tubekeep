@@ -24,36 +24,34 @@ function resolveWithin(base, ...segments) {
   return target;
 }
 
-// Filesystem-only view of one download directory: its files and how recently
-// the directory was touched (a write bumps mtime, which is what the age-based
-// sweep uses in place of a stored `createdAt`). The `downloads` row — not this
-// — is the source of truth for everything else (title, status, kept, …).
-// Returns null if the id is invalid or the directory can't be read.
+// Filesystem-only view of one download directory: which files it holds. The
+// `downloads` row — not this — is the source of truth for everything else
+// (title, status, lifecycle, …). Returns null if the id is invalid or the
+// directory can't be read.
 function getDownloadDir(downloadId) {
   if (!isValidDownloadId(downloadId)) return null;
   const dirPath = path.join(downloadsDir, downloadId);
   let files;
-  let mtimeMs;
   try {
     files = fs.readdirSync(dirPath);
-    mtimeMs = fs.statSync(dirPath).mtimeMs;
   } catch (err) {
     console.error(`⚠️  Skipping unreadable download ${downloadId}: ${err.message}`);
     return null;
   }
-  return { downloadId, files, mtimeMs };
+  return { downloadId, files };
 }
 
 // True when a `getDownloadDir`/`listDownloadDirs` entry still has media to
 // serve or move. An empty directory (drained by a prior expire/move, or never
-// written to) has nothing left to reclaim or upload — the one "does this
-// download still have files" check, shared by the age-based sweep and the
-// move-to-cloud job instead of each re-deriving it from `.files.length`.
+// written to) has nothing left to upload — the one "does this download still
+// have files" check, shared by the cleanup reconcile and the move-to-cloud job
+// instead of each re-deriving it from `.files.length`.
 function hasMedia(dir) {
   return !!dir && dir.files.length > 0;
 }
 
-// Every download directory on disk — the raw material the cleanup sweep walks.
+// Every download directory on disk — the raw material the cleanup reconcile
+// walks to answer "which rows still have media".
 // Ordering doesn't matter here (unlike the old metadata-backed listing, nothing
 // renders this directly); callers derive whatever order they need.
 function listDownloadDirs() {
@@ -211,42 +209,24 @@ function markMoved(downloadId) {
   return deleteDownload(downloadId);
 }
 
-// Age-based expiry over a set of on-disk directories (default: a fresh scan).
-// Age is the directory's `mtimeMs` — the closest filesystem-only stand-in for
-// "last touched" now that there's no stored `createdAt` to read. `skipIds`
-// (downloads currently `kept`, and/or actively running in *this* process —
-// see downloadManager's `runningDownloadIds`) is never touched regardless of
-// age. Everything else — which downloads exist, whether one is `kept`,
-// whether it's still running — is the caller's job to know; this function
-// only ever deletes directories.
-//
-// This deliberately does NOT skip empty directories: one with no files is
-// exactly what a download that died before any bytes landed looks like
-// (`ensureDownloadDir` ran, the job never got further), and reclaiming those
-// once they go stale is this function's replacement for the old, separate
-// `cleanupOrphanDirs` sweep — folded in here rather than kept as a second
-// pass, since both are now just "how old is this directory".
-function cleanupOldDownloads(maxAgeHours = 24, { downloads = listDownloadDirs(), skipIds } = {}) {
-  const now = Date.now();
-  const maxAgeMs = maxAgeHours * 60 * 60 * 1000;
-  const skip = skipIds || new Set();
-  const expiredIds = [];
+// Reclaim the media of a set of downloads a bulk store UPDATE has just retired:
+// `supersedeForUser` (re-download replaced them) and `failStale` (a restart
+// stranded them) both return the ids they touched precisely so their media can
+// be removed — nothing else will ever reach those directories again. Collects
+// errors instead of throwing: every caller is best-effort housekeeping around a
+// row change that already succeeded, and one unreadable directory must not stop
+// the rest.
+function removeMediaFor(downloadIds) {
   const errors = [];
-
-  for (const dir of downloads) {
-    if (skip.has(dir.downloadId)) continue;
-
+  let removed = 0;
+  for (const id of downloadIds) {
     try {
-      if (now - dir.mtimeMs > maxAgeMs) {
-        expireDownload(dir.downloadId);
-        expiredIds.push(dir.downloadId);
-      }
+      if (deleteDownload(id)) removed++;
     } catch (err) {
-      errors.push({ dir: dir.downloadId, error: err.message });
+      errors.push({ dir: id, error: err.message });
     }
   }
-
-  return { expired: expiredIds.length, expiredIds, errors };
+  return { removed, errors };
 }
 
 module.exports = {
@@ -270,5 +250,5 @@ module.exports = {
   deleteDownload,
   expireDownload,
   markMoved,
-  cleanupOldDownloads,
+  removeMediaFor,
 };

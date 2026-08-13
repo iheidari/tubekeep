@@ -173,9 +173,11 @@ function createStore(query) {
     },
 
     // Reconcile history against the filesystem: every completed, still-live row
-    // whose media is NOT in `presentIds` has lost its files (aged out by the
-    // sweep, removed by the standalone cleanup CLI, or deleted by hand) and is
-    // therefore expired. Driving this off "what's actually on disk" rather than
+    // whose media is NOT in `presentIds` has lost its files and is therefore
+    // expired. With no age sweep left, that only happens outside the app — a
+    // manual `rm` in DOWNLOADS_DIR, a lost volume, a half-finished delete —
+    // which is exactly why it stays. Driving this off "what's actually on disk"
+    // rather than
     // "what this run just expired" keeps the table honest no matter who removed
     // the files. Used by the hourly sweep, across all users.
     //
@@ -206,26 +208,22 @@ function createStore(query) {
       ]);
     },
 
-    // Every `kept` download's id, across all users — the cleanup sweep's
-    // exclusion set. A directory the sweep would otherwise age out is never
-    // touched while its row says `kept`, no matter how stale it looks on disk.
-    async keptIds() {
-      const { rows } = await query('SELECT download_id FROM downloads WHERE kept', []);
-      return rows.map((r) => r.download_id);
-    },
-
     // Retire `downloading` rows that can no longer be running. The job registry
     // is in-memory, so a restart mid-download strands its row — and a stranded
     // row would count against the user's quota forever. Called by the hourly
-    // sweep with a window far longer than any real download.
+    // sweep with a window far longer than any real download. Returns the ids it
+    // retired (like `supersedeForUser`) so the caller can remove the partial
+    // files those crashed jobs left behind — nothing else ever will, and since
+    // downloads no longer expire by age they would occupy disk permanently.
     async failStale(olderThanMs) {
-      const { rowCount } = await query(
+      const { rows } = await query(
         `UPDATE downloads
             SET status = 'failed'
-          WHERE status = 'downloading' AND created_at < now() - ($1::bigint * interval '1 ms')`,
+          WHERE status = 'downloading' AND created_at < now() - ($1::bigint * interval '1 ms')
+        RETURNING download_id`,
         [Math.max(0, Math.floor(olderThanMs))],
       );
-      return rowCount;
+      return rows.map((r) => r.download_id);
     },
 
     // Expire = the media is gone but the row stays (re-downloadable). Only a
@@ -384,19 +382,16 @@ function createMemoryStore({ rows = [] } = {}) {
       row.moved = true;
       row.moved_info = movedInfo || null;
     },
-    async keptIds() {
-      return [...byId.values()].filter((r) => r.kept).map((r) => r.download_id);
-    },
     async failStale(olderThanMs) {
       const cutoff = Date.now() - olderThanMs;
-      let n = 0;
+      const failed = [];
       for (const row of byId.values()) {
         if (row.status === 'downloading' && new Date(row.created_at).getTime() < cutoff) {
           row.status = 'failed';
-          n++;
+          failed.push(row.download_id);
         }
       }
-      return n;
+      return failed;
     },
     async expireForUser(downloadId, userId) {
       const row = byId.get(downloadId);

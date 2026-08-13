@@ -56,7 +56,6 @@ async function seedComplete(store, downloadId, userId, size, opts = {}) {
     title: opts.title ?? 'a video',
     type: 'video',
     filesize: size,
-    kept: opts.kept,
     sourceKey: opts.sourceKey,
   });
   await store.markComplete(downloadId, { filename: `${downloadId}.mp4`, filesize: size });
@@ -263,21 +262,25 @@ function runDownloadsStoreContract({ label, freshStore, backdate, skip = false }
     assert.equal(await store.usageForUser(USER), 0);
   });
 
-  it('setKeptForUser flips the flag, and keptIds spans every user', async () => {
+  // `kept` is vestigial: it existed to exempt a download from the age-based
+  // cleanup sweep, and nothing expires by age any more (its reader, keptIds,
+  // went with the sweep). Column, setter and PATCH route are kept so no
+  // migration is needed and a future per-download pin has somewhere to land —
+  // so the setter still has to work, and stay scoped to its owner.
+  it('setKeptForUser flips the flag on the caller’s own row only', async () => {
     const store = await freshStore();
-    const [a, b, c] = [id('a'), id('b'), id('c')];
-    await seedComplete(store, a, USER, 100, { kept: true });
-    await seedComplete(store, b, USER, 100);
-    await seedComplete(store, c, OTHER, 100, { kept: true });
+    const [mine, theirs] = [id('mine'), id('theirs')];
+    await seedComplete(store, mine, USER, 100);
+    await seedComplete(store, theirs, OTHER, 100);
 
-    // keptIds is the cleanup sweep's exclusion set, so it is deliberately
-    // unscoped — one user's pin must protect their files during a global sweep.
-    assert.deepEqual(namesOf(await store.keptIds()), ['a', 'c']);
+    assert.equal(await store.setKeptForUser(mine, USER, true), true);
+    assert.equal((await store.findForUser(mine, USER)).kept, true);
 
-    assert.equal(await store.setKeptForUser(b, USER, true), true);
-    assert.deepEqual(namesOf(await store.keptIds()), ['a', 'b', 'c']);
-    assert.equal(await store.setKeptForUser(a, USER, false), true);
-    assert.deepEqual(namesOf(await store.keptIds()), ['b', 'c']);
+    assert.equal(await store.setKeptForUser(theirs, USER, true), false);
+    assert.equal((await store.findForUser(theirs, OTHER)).kept, false);
+
+    assert.equal(await store.setKeptForUser(mine, USER, false), true);
+    assert.equal((await store.findForUser(mine, USER)).kept, false);
   });
 
   // --- the cleanup sweep's reconcile ----------------------------------------
@@ -416,7 +419,9 @@ function runDownloadsStoreContract({ label, freshStore, backdate, skip = false }
     await store.insert({ downloadId: stranded, userId: USER, filesize: 100 });
     await backdate(store, stranded, { createdAt: new Date(Date.now() - 10 * HOUR) });
 
-    assert.equal(await store.failStale(6 * HOUR), 1);
+    // Returns the ids it retired, not a count — the cleanup sweep deletes the
+    // partial files those crashed jobs left behind, and nothing else would.
+    assert.deepEqual(namesOf(await store.failStale(6 * HOUR)), ['stranded']);
     assert.equal((await store.findForUser(stranded, USER)).status, 'failed');
     assert.equal((await store.findForUser(fresh, USER)).status, 'downloading');
     // The stranded row stops occupying the quota.

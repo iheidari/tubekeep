@@ -11,11 +11,11 @@ function DownloadPage() {
   const navigate = useNavigate()
   const { markFailed, cancelDownload } = useHistory()
 
-  // Start params (title/thumbnail/type + the "Keep forever" choice) come via
-  // router state, recovered from sessionStorage on a reload. They're only used
-  // for the local display + the failed-row fallback now — the download itself
-  // runs server-side and the SSE is a pure observer, so we can attach to an
-  // in-flight job (new tab / reload / cold visit) with just the downloadId.
+  // Start params (title/thumbnail/type) come via router state, recovered from
+  // sessionStorage on a reload. They're only used for the local display + the
+  // failed-row fallback now — the download itself runs server-side and the SSE
+  // is a pure observer, so we can attach to an in-flight job (new tab / reload
+  // / cold visit) with just the downloadId.
   const stateStart = location.state?.start ? location.state : null
   const startParams = useMemo(
     () => stateStart || loadStartParams(downloadId),

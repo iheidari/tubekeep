@@ -1,16 +1,22 @@
 const {
-  cleanupOldDownloads,
   listDownloadDirs,
   isValidDownloadId,
   hasMedia,
   getDownloadFileSize,
+  removeMediaFor,
 } = require('../utils/storage');
 const { sweepJobs, runningDownloadIds } = require('./downloadManager');
 
+// How often the reconcile sweep runs.
+//
+// There is deliberately NO age-based expiry: a download's media stays until its
+// owner deletes it. Disk is bounded by the per-user quota
+// (`users.max_storage_bytes`, enforced at POST /api/download), not by a clock —
+// so this sweep never removes the media of a download that succeeded. What it
+// still does is keep the `downloads` table honest against the filesystem
+// (stranded rows healed, vanished media marked expired, crashed downloads
+// retired) and prune finished job records.
 const CLEANUP_INTERVAL_HOURS = 1;
-// Downloads are a transfer, not storage: a visitor either moves a file to their
-// own cloud or downloads it to their device shortly after. Expire after 1h.
-const MAX_FILE_AGE_HOURS = 1;
 
 // A `downloading` history row older than this can't still be running — the job
 // registry is in-memory, so a restart strands its row. Generously past the
@@ -20,7 +26,7 @@ const STALE_DOWNLOADING_MS = 6 * 60 * 60 * 1000;
 // A download that finishes *while* the sweep is running is missing from the
 // directory snapshot the reconcile compares against, so it would be expired the
 // moment it landed. Rows younger than this are left alone — comfortably longer
-// than a sweep, far shorter than MAX_FILE_AGE_HOURS.
+// than a sweep, far shorter than any real download's lifetime.
 const RECONCILE_GRACE_MS = 10 * 60 * 1000;
 
 let cleanupInterval = null;
@@ -41,12 +47,12 @@ const PARTIAL_FILE_RE = /\.(part|ytdl)$/i;
 // LARGEST file wins, since the merged output always outweighs any leftover
 // intermediate fragments.
 //
-// This MUST run before both the age-based expiry and failStale (see the call
-// site's ordering note): on the same sweep, whichever runs first wins the race
-// for a row that qualifies for more than one, and only this one is correct for
-// a row with finished media on disk. A genuinely in-flight job is
-// untouched here — it's excluded via runningDownloadIds() (and a job that
-// died mid-flight leaves partial artifacts, caught above).
+// This MUST run before failStale (see the call site's ordering note): on the
+// same sweep, whichever runs first wins the race for a row that qualifies for
+// both, and only this one is correct for a row with finished media on disk. A
+// genuinely in-flight job is untouched here — it's excluded via
+// runningDownloadIds() (and a job that died mid-flight leaves partial
+// artifacts, caught above).
 //
 // Pre-filters to rows that are actually `downloading` in the DB first —
 // normally none, and never more than a handful — instead of stat-ing and
@@ -78,8 +84,8 @@ async function reconcileStrandedDownloads(store, downloads) {
 }
 
 // `store` is the per-user history store (server.js passes the live one). Omitted
-// — as in unit tests and the standalone CLI, which have no database — the sweep
-// is filesystem-only.
+// — as in unit tests, which have no database — the sweep can only prune job
+// records, since every reconcile step it performs is a table operation.
 function startCleanupScheduler({ store = null } = {}) {
   if (cleanupInterval) {
     clearInterval(cleanupInterval);
@@ -88,7 +94,7 @@ function startCleanupScheduler({ store = null } = {}) {
   const intervalMs = CLEANUP_INTERVAL_HOURS * 60 * 60 * 1000;
 
   console.log(
-    `🧹 Cleanup scheduler started (runs every ${CLEANUP_INTERVAL_HOURS}h, max age: ${MAX_FILE_AGE_HOURS}h)`,
+    `🧹 Cleanup scheduler started (reconcile sweep every ${CLEANUP_INTERVAL_HOURS}h; downloads never expire by age)`,
   );
 
   // runCleanup is async (it syncs the history table); the scheduler is
@@ -110,124 +116,101 @@ function startCleanupScheduler({ store = null } = {}) {
 
 async function runCleanup(store = null) {
   console.log('🧹 Running cleanup...');
-  // Scan the downloads directory once and reuse the snapshot below: listDownloadDirs
-  // is synchronous and stats every download dir, so a second walk would block the
-  // event loop twice per sweep for the same answer.
+  const result = { reconciled: 0, expiredRows: 0, failedIds: [], errors: [], prunedJobs: 0 };
+
+  if (!store) {
+    // Every reconcile step below is a `downloads`-table operation, so with no
+    // store there is nothing to do but prune the in-memory job registry — not
+    // even the directory scan, which is why it lives below this return.
+    result.prunedJobs = pruneJobs();
+    return result;
+  }
+
+  // Scan the downloads directory once and reuse the snapshot below:
+  // listDownloadDirs is synchronous and readdir's every download dir, so a
+  // second walk would block the event loop twice per sweep for the same answer.
   const downloads = listDownloadDirs();
 
-  // Heal hook-stranded rows FIRST — before the age-based sweep below can delete
-  // the very media that proves they finished (0XC-151). A finished directory can
-  // already be older than MAX_FILE_AGE_HOURS the first time any sweep sees it
-  // (the completion hook's DB write was lost, and no earlier sweep caught it);
-  // with the age sweep running first, that media would be gone by the time the
-  // reconcile looked for it, leaving the row stuck `downloading` until failStale
-  // wrongly retired it as `failed` even though the download had succeeded. Run
-  // this way round, the row is corrected to `complete` and then expired by the
-  // ordinary path (its media having just aged out) — the honest outcome.
+  // Heal hook-stranded rows FIRST — before failStale below can retire one that
+  // actually succeeded (0XC-120/0XC-151). The reconcile is the only step that
+  // can tell a lost completion write apart from a download that really died.
   //
-  // A failure here fails CLOSED for both later steps, same reasoning as
-  // keptIds() below: without a trustworthy answer to "did this row actually
-  // finish?", neither deleting its media nor retiring it as failed is safe.
+  // A failure here fails CLOSED for failStale: without a trustworthy answer to
+  // "did this row actually finish?", recording it as failed (and deleting the
+  // media that would have proved otherwise, below) could be wrong, and waiting
+  // an hour for the next sweep costs nothing.
   let strandedReconcileOk = true;
-  if (store) {
-    try {
-      const strandedComplete = await reconcileStrandedDownloads(store, downloads);
-      if (strandedComplete > 0) {
+  try {
+    result.reconciled = await reconcileStrandedDownloads(store, downloads);
+    if (result.reconciled > 0) {
+      console.log(
+        `🧹 Reconciled ${result.reconciled} stranded download(s) that had already finished`,
+      );
+    }
+  } catch (err) {
+    console.error(
+      '⚠️ Cleanup could not reconcile stranded downloads — skipping failStale this sweep:',
+      err.message,
+    );
+    strandedReconcileOk = false;
+  }
+
+  try {
+    // Mark rows whose media is gone. Nothing expires media on a timer any more,
+    // so this now only catches media that went away by some other route — a
+    // manual `rm` in DOWNLOADS_DIR, a lost volume, a partially-failed delete.
+    // The row stays visible and re-downloadable, and stops occupying quota.
+    const present = downloads
+      .filter(hasMedia)
+      .map((d) => d.downloadId)
+      // The ids become a ::uuid[] parameter, so one non-UUID directory name
+      // would abort the whole reconcile with a cast error.
+      .filter(isValidDownloadId);
+    result.expiredRows = await store.expireMissing(present, RECONCILE_GRACE_MS);
+    if (result.expiredRows > 0) {
+      console.log(`🧹 Marked ${result.expiredRows} history row(s) expired`);
+    }
+
+    // Only ever retire a row as failed once the reconcile above has had its
+    // say. A download the server was killed mid-flight leaves a `.part` file
+    // behind that no user action will ever reach — the row renders as failed,
+    // and a failed row is excluded from the quota — so removing that directory
+    // is what keeps a crash from leaking disk permanently now that nothing
+    // expires by age. Only the ids failStale itself just retired are touched,
+    // so this can never reach a download that succeeded.
+    //
+    // Sharing expireMissing's try block means an expireMissing failure skips
+    // this step too. That's incidental rather than load-bearing — unlike the
+    // strandedReconcileOk gate — but it errs the same safe way, so it stays.
+    if (strandedReconcileOk) {
+      result.failedIds = await store.failStale(STALE_DOWNLOADING_MS);
+      if (result.failedIds.length > 0) {
         console.log(
-          `🧹 Reconciled ${strandedComplete} stranded download(s) that had already finished`,
+          `🧹 Marked ${result.failedIds.length} stranded in-progress download(s) as failed`,
         );
+        result.errors.push(...removeMediaFor(result.failedIds).errors);
       }
-    } catch (err) {
-      console.error(
-        '⚠️ Cleanup could not reconcile stranded downloads — skipping age-based expiry and failStale this sweep:',
-        err.message,
-      );
-      strandedReconcileOk = false;
     }
-  }
-
-  // Never age out a directory a job in *this* process is actively writing to.
-  // With a store, also spare anything flagged `kept` — the DB is the only
-  // remaining record of that, so a directory can't tell on its own. Unlike
-  // the pre-0XC-109 metadata.json mirror, `kept` protection now depends on
-  // this query succeeding *every* sweep, not just at toggle time — so a
-  // failure here fails CLOSED (skip age-based expiry entirely this pass)
-  // rather than open. Deleting a `kept` download's media is irreversible; a
-  // transient DB hiccup delaying a disk reclaim by an hour is not. Same
-  // reasoning as the per-user quota check's fail-closed behavior in
-  // routes/download.js.
-  const skipIds = new Set(runningDownloadIds());
-  let canExpireByAge = strandedReconcileOk;
-  if (store) {
-    try {
-      for (const id of await store.keptIds()) skipIds.add(id);
-    } catch (err) {
-      console.error(
-        '⚠️ Could not load kept downloads — skipping age-based expiry this sweep to avoid deleting one:',
-        err.message,
-      );
-      canExpireByAge = false;
-    }
-  }
-
-  const result = canExpireByAge
-    ? cleanupOldDownloads(MAX_FILE_AGE_HOURS, { downloads, skipIds })
-    : { expired: 0, expiredIds: [], errors: [] };
-
-  if (result.expired > 0) {
-    console.log(`✅ Expired ${result.expired} old downloads: ${result.expiredIds.join(', ')}`);
-  } else {
-    console.log('✅ No old downloads to expire');
-  }
-
-  // Mirror the filesystem sweep into the per-user history table, which is what
-  // the UI lists and the quota is computed from — otherwise an aged-out download
-  // would keep occupying its owner's allowance. No store in unit tests / the
-  // standalone CLI without a database, where this is a no-op.
-  if (store) {
-    try {
-      // Reconcile against what is actually still on disk, so rows also expire
-      // when the files went away by some other route (standalone `npm run
-      // cleanup`, a manual rm) — not just when this run expired them. Derived
-      // from the pre-sweep snapshot minus what this run just expired, which is
-      // the same set a fresh scan would report.
-      const expiredNow = new Set(result.expiredIds);
-      const present = downloads
-        .filter((d) => hasMedia(d) && !expiredNow.has(d.downloadId))
-        .map((d) => d.downloadId)
-        // The ids become a ::uuid[] parameter, so one non-UUID directory name
-        // would abort the whole reconcile with a cast error.
-        .filter(isValidDownloadId);
-      const reconciled = await store.expireMissing(present, RECONCILE_GRACE_MS);
-      if (reconciled > 0) {
-        console.log(`🧹 Marked ${reconciled} history row(s) expired`);
-      }
-      // Only ever retire a row as failed once the reconcile above has had its
-      // say — it is the only step that can tell a lost hook write apart from a
-      // download that really died.
-      if (strandedReconcileOk) {
-        const stale = await store.failStale(STALE_DOWNLOADING_MS);
-        if (stale > 0) {
-          console.log(`🧹 Marked ${stale} stranded in-progress download(s) as failed`);
-        }
-      }
-    } catch (err) {
-      console.error('⚠️ Cleanup could not update download history:', err.message);
-    }
+  } catch (err) {
+    console.error('⚠️ Cleanup could not update download history:', err.message);
   }
 
   if (result.errors.length > 0) {
     console.error('⚠️ Cleanup errors:', result.errors);
   }
 
-  // Prune terminal (complete/error) download-job records the manager retains for
-  // reconnects, so a long-lived process doesn't accumulate them.
-  const prunedJobs = sweepJobs();
-  if (prunedJobs > 0) {
-    console.log(`🧹 Pruned ${prunedJobs} finished download job(s)`);
-  }
-
+  result.prunedJobs = pruneJobs();
   return result;
+}
+
+// Prune terminal (complete/error) download-job records the manager retains for
+// reconnects, so a long-lived process doesn't accumulate them.
+function pruneJobs() {
+  const pruned = sweepJobs();
+  if (pruned > 0) {
+    console.log(`🧹 Pruned ${pruned} finished download job(s)`);
+  }
+  return pruned;
 }
 
 function stopCleanupScheduler() {
@@ -235,25 +218,6 @@ function stopCleanupScheduler() {
     clearInterval(cleanupInterval);
     cleanupInterval = null;
   }
-}
-
-// Standalone `npm run cleanup`: filesystem only, driven by directory mtime —
-// there's no store (so no `kept` to read) and no job registry (so no
-// `runningDownloadIds()` either, since that only knows about jobs in *this*
-// process — this is always a separate, one-shot process from the running
-// server). With neither guard available, use the same generous window the
-// old dedicated orphan-directory sweep used (`STALE_DOWNLOADING_MS`, 6h)
-// instead of the server sweep's much tighter `MAX_FILE_AGE_HOURS` (1h): the
-// tight window is only safe *because* the running server's `runCleanup` has
-// `runningDownloadIds()` to fall back on, and a lone CLI invocation does not.
-// This is still a partial sweep — the running server's hourly sweep is what
-// reconciles the history rows and honors `kept` — but it no longer risks
-// deleting a live server's in-progress download out from under it just for
-// being mtime-quiet within the first hour.
-if (require.main === module) {
-  const result = cleanupOldDownloads(STALE_DOWNLOADING_MS / (60 * 60 * 1000));
-  console.log('Manual cleanup result:', result);
-  process.exit(0);
 }
 
 module.exports = {

@@ -171,7 +171,7 @@ function InfoPage() {
 
   if (!url) return <Navigate to="/" replace />
 
-  const handleDownload = async (formatId, type, keep, filesize) => {
+  const handleDownload = async (formatId, type, filesize) => {
     setStartingFormat(formatId)
     setError(null)
     setStartError(null)
@@ -189,7 +189,6 @@ function InfoPage() {
           type,
           title: info.title,
           thumbnail: info.thumbnail,
-          keep,
           filesize,
           // Namespaced extractor id from /api/info — lets the server match a
           // re-download by canonical video identity instead of the raw URL
@@ -208,10 +207,9 @@ function InfoPage() {
         type,
         title: info.title,
         thumbnail: info.thumbnail,
-        keep,
       }
       // Persist per-tab so a reload of the download page can resume the SSE
-      // (and keep the "Keep forever" choice) instead of losing router state.
+      // instead of losing router state.
       saveStartParams(downloadId, startState)
       // Write a "Downloading…" row now so the file is findable in the Downloads
       // list even if the user navigates away before the SSE completes. It

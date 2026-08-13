@@ -52,6 +52,9 @@ server → hand to the visitor's cloud → forget.
   including `metadata.json`).
 - Independently, **auto-expiry drops from 24h → 1h** (`MAX_FILE_AGE_HOURS` in
   `services/cleanup.js`; also update any frontend copy that says "24h").
+  > **Superseded.** Age-based expiry is gone entirely: downloads stay until their owner
+  > deletes them, and the per-user quota bounds disk use instead. `MAX_FILE_AGE_HOURS`,
+  > `cleanupOldDownloads` and the "expiring soon" move gate no longer exist.
 - **Consequence, accepted:** Play (`/play/:id`) and any shared `/play/:id` link **stop working**
   the moment a file is moved. This is intentional under Model A.
 - The "moved" history row lives **only in the browser's localStorage** (the server keeps no
@@ -209,11 +212,13 @@ and **[onedrive-setup.md](./onedrive-setup.md)** for how to obtain these.
   - `context/HistoryContext.jsx` — `markMoved`/`forgetMoved`. (As of 0XC-100 the server owns the
     moved flag; the provider only mirrors it, and `dropLocal` is gone.)
   - Wired into `DownloadsPage` (active cards + a `MovedCard`) and `PlayPage`.
-- **Known follow-up (not yet done):** the hourly cleanup (`MAX_FILE_AGE_HOURS = 1`) does not yet
+- ~~**Known follow-up (not yet done):** the hourly cleanup (`MAX_FILE_AGE_HOURS = 1`) does not yet
   exempt an in-flight move. A move of a file already near the 1h mark could have its source
   expired mid-upload → the upload fails and the local file is kept-then-removed. Low probability;
-  the fix is to mark the download `kept` (or hold a lock) for the life of the job. Folded into
-  "Future hardening" below.
+  the fix is to mark the download `kept` (or hold a lock) for the life of the job.~~
+  > **Resolved by removal.** Age-based expiry is gone, so nothing can pull a move's source out
+  > from under it: the sweep only ever deletes media for rows `failStale` just retired, which a
+  > completed download can never be. `MAX_FILE_AGE_HOURS` and `kept`-as-a-pin no longer exist.
 
 ## Out of scope (parked)
 - **Subscription / retention tier:** paid users get files stored *by us* with a
