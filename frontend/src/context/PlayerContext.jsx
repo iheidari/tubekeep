@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useResumePosition } from '../hooks/useResumePosition'
 import { fileUrl, mediaKind } from '../lib/media'
-import { clearPosition, positionToSeek, SAVE_INTERVAL_MS, savePosition } from '../lib/resume'
 import { PlayerContext } from './playerContext.js'
 import { useAuth } from './useAuth.js'
 
@@ -47,56 +47,15 @@ export function PlayerProvider({ children }) {
   // holds it for the metadata listener, whose effect runs once with no deps.
   const rateRef = useRef(1)
 
-  // Resume bookkeeping, all in refs: the media listeners below are registered
-  // once (no deps) and the flush points are stable callbacks, so none of them
-  // can close over a stale track or identity.
-  const trackRef = useRef(null) // mirrors `current` — kept in sync by playTrack/closePlayer
-  const authRef = useRef({ ready: false, email: null })
-  const lastSaveRef = useRef(0) // ms timestamp of the last write
-  const resumedForRef = useRef(null) // streamUrl already seeked, so it happens once per source
-  // Layout effect, not render-time assignment: it still lands before the
-  // browser can paint (or fire a media event) but never runs for a render React
-  // discards.
-  useLayoutEffect(() => {
-    authRef.current = { ready: !authLoading, email: authEmail }
-  }, [authLoading, authEmail])
-
-  // Persist where playback is right now — on pause, on a source change, on
-  // close, when the tab is hidden, and (with `throttled`) on the playback tick,
-  // which is the only caller that can fire faster than the interval. Whether the
-  // position is worth keeping is lib/resume's call, not ours.
-  const flushPosition = useCallback(({ throttled = false } = {}) => {
-    const media = mediaRef.current
-    const track = trackRef.current
-    const { ready, email } = authRef.current
-    if (!media || !track || !ready) return
-    if (throttled && Date.now() - lastSaveRef.current < SAVE_INTERVAL_MS) return
-    lastSaveRef.current = Date.now()
-    savePosition(email, track, media.currentTime, media.duration)
-  }, [])
-
-  // Seek to the saved position, at most once per stream URL. It needs both the
-  // duration (the read tests the position against *this* file, and `currentTime`
-  // isn't settable before metadata) and a settled session (it namespaces the
-  // storage) — either can land last, so this is called from the metadata
-  // listener below *and* from an effect watching the session, with
-  // `resumedForRef` letting only the winner act. That ref is keyed on the stream
-  // URL rather than a per-effect flag, which is also why expanding the dock onto
-  // the stage never yanks playback backwards.
-  const restorePosition = useCallback(() => {
-    const media = mediaRef.current
-    const track = trackRef.current
-    const { ready, email } = authRef.current
-    if (!media || !track || !ready) return
-    if (resumedForRef.current === track.streamUrl) return
-    if (!Number.isFinite(media.duration) || media.duration <= 0) return // wait for durationchange
-    resumedForRef.current = track.streamUrl
-    const saved = positionToSeek(email, track, {
-      duration: media.duration,
-      currentTime: media.currentTime,
-    })
-    if (saved !== null) media.currentTime = saved
-  }, [])
+  // Where playback left off last time (0XC-462). It owns which track is loaded
+  // (`begin`/`release`), so this provider keeps no mirror of `current` in a ref.
+  const {
+    begin: beginResume,
+    release: releaseResume,
+    save: saveResume,
+    restore: restoreResume,
+    forget: forgetResume,
+  } = useResumePosition({ mediaRef, email: authEmail, ready: !authLoading })
 
   // Move the element to the most specific mounted host (stage > dock > home).
   const placeMedia = useCallback(() => {
@@ -155,23 +114,18 @@ export function PlayerProvider({ children }) {
     const onPlay = () => setIsPlaying(true)
     const onPause = () => {
       setIsPlaying(false)
-      flushPosition()
+      saveResume()
     }
     const onTime = () => {
       setCurrentTime(media.currentTime || 0)
-      flushPosition({ throttled: true })
+      saveResume({ throttled: true })
     }
-    // A video watched to the end is forgotten outright, so re-opening it starts
-    // at 0:00 rather than at its final frame.
-    const onEnded = () => {
-      const { ready, email } = authRef.current
-      if (ready) clearPosition(email, trackRef.current)
-    }
+    const onEnded = () => forgetResume()
     const onMeta = () => {
       setDuration(media.duration || 0)
       // A fresh source starts at 1×; restore the user's chosen rate.
       media.playbackRate = rateRef.current
-      restorePosition()
+      restoreResume()
     }
     // Trust the element's own MediaError: it's set on a real failure (e.g. an
     // expired file 404ing) and cleared by load() on teardown, so this shows the
@@ -196,46 +150,30 @@ export function PlayerProvider({ children }) {
       media.removeEventListener('durationchange', onMeta)
       media.removeEventListener('error', onError)
     }
-  }, [flushPosition, restorePosition])
+  }, [saveResume, restoreResume, forgetResume])
 
-  // The other half of the race: metadata may already have landed by the time
-  // /api/auth/me answers, in which case this is the attempt that wins.
+  // The other half of the restore race: metadata may already have landed by the
+  // time /api/auth/me answers, in which case this is the attempt that wins.
   useEffect(() => {
-    if (!authLoading) restorePosition()
-  }, [authLoading, restorePosition])
+    if (!authLoading) restoreResume()
+  }, [authLoading, restoreResume])
 
-  // Mobile Safari doesn't reliably fire `beforeunload` when a tab is
-  // backgrounded or swiped away, so this is the last write we're guaranteed.
-  useEffect(() => {
-    const onHidden = () => {
-      if (document.visibilityState === 'hidden') flushPosition()
-    }
-    document.addEventListener('visibilitychange', onHidden)
-    return () => document.removeEventListener('visibilitychange', onHidden)
-  }, [flushPosition])
-
-  // `trackRef` is updated here and in closePlayer — the only two setters of
-  // `current` — so the media listeners, registered once, always see the track
-  // that's actually loaded. Switching sources flushes the outgoing position
-  // first: by the time an effect cleanup ran, the element's `src` would already
-  // have changed and its `currentTime` reset to 0.
   const playTrack = useCallback(
     (download, apiUrl) => {
       const track = toTrack(download, apiUrl)
-      if (trackRef.current?.downloadId !== track.downloadId) {
-        flushPosition()
-        trackRef.current = track
-        setCurrent(track)
-      }
+      // `beginResume` owns "which track is loaded", so it answers whether this
+      // is actually a new one — and flushes the outgoing position before the
+      // element's `src` swaps out from under it.
+      if (beginResume(track)) setCurrent(track)
       setLoadError(false)
     },
-    [flushPosition],
+    [beginResume],
   )
 
   const closePlayer = useCallback(() => {
-    flushPosition()
-    trackRef.current = null
-    resumedForRef.current = null
+    // Before `load()` below: that fires `durationchange`, which would otherwise
+    // re-enter the restore path against a track we're in the middle of dropping.
+    releaseResume()
     const media = mediaRef.current
     if (media) {
       media.pause()
@@ -247,7 +185,7 @@ export function PlayerProvider({ children }) {
     setCurrentTime(0)
     setDuration(0)
     setLoadError(false)
-  }, [flushPosition])
+  }, [releaseResume])
 
   const togglePlay = useCallback(() => {
     const media = mediaRef.current
