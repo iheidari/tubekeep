@@ -67,6 +67,7 @@ tubekeep/
 - **High Quality Support**: Automatically merges high-res video with audio
 - **Real-time Progress**: Watch download progress with Server-Sent Events (SSE)
 - **In-browser Player**: Stream videos directly in the browser
+- **Resume Where You Left Off**: The player remembers your position and picks a video back up on your next visit — per browser (it isn't synced across devices), and it survives a re-download of the same video
 - **Download History**: View, play, and manage previous downloads — stored per-user in Postgres, so it follows your account across devices
 - **Per-user Storage Quota**: Each account has a `max_storage_bytes` allowance (default 5 GB, `-1` = unlimited) enforced before a download starts
 - **You Decide When Files Go**: Nothing is deleted on a timer — a download stays until you delete it, move it to your cloud, or replace it with a re-download. Your quota is what bounds disk use

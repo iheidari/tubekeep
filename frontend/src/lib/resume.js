@@ -28,9 +28,12 @@ export const MAX_ENTRIES = 50
 export const SAVE_INTERVAL_MS = 5000
 
 // Which identity a track's position is filed under. `sourceKey` when the record
-// carries one, else `downloadId` — so a re-download (new `downloadId`, same
-// canonical video) keeps your place. Same fallback rule as `sharesSource` in
-// lib/media.js and `supersedeForUser` in the backend's downloadsStore.
+// carries one — the half shared with `sharesSource` (lib/media.js) and the
+// backend's `supersedeForUser` — so a re-download (new `downloadId`, same
+// canonical video) keeps your place. The fallback differs from theirs on
+// purpose: they fall back to exact `url`, which a track doesn't carry, so this
+// falls back to `downloadId`. That's also what an anonymous /play/:id viewer
+// gets, since the public meta endpoint returns no `sourceKey`.
 export function resumeKey(track) {
   return track?.sourceKey || track?.downloadId || null
 }
