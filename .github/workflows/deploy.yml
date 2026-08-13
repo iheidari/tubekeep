@@ -5,8 +5,8 @@ on:
     branches: [ main ]
   workflow_dispatch:
   schedule:
-    # Daily rebuild to pull the latest yt-dlp (YouTube breaks extraction often).
-    - cron: '0 6 * * *'
+    # Weekly rebuild to pull the latest yt-dlp (YouTube breaks extraction often).
+    - cron: '0 6 * * 1'
 
 env:
   IMAGE: ghcr.io/${{ github.repository }}
@@ -39,7 +39,7 @@ jobs:
     permissions:
       contents: read
     # Mirrors ci.yml's `test` job, service and all — deploy.yml also fires on the
-    # daily scheduled rebuild and on workflow_dispatch, neither of which goes
+    # weekly scheduled rebuild and on workflow_dispatch, neither of which goes
     # through a PR, so dropping the database here would silently stop covering
     # the SQL branch on exactly those runs. See ci.yml for why it exists.
     services:
