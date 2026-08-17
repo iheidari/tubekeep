@@ -73,17 +73,21 @@ npm run check     # biome check --write .  (safe lint fixes + formatting)
 
 ### Tests
 
-Two suites, both hermetic (no network, no database, no `yt-dlp`) and both gating every PR:
+Three suites, all hermetic (no network, no database, no `yt-dlp`) and all gating every PR:
 
 ```bash
-cd backend && npm test    # node:test, *.test.js colocated with the source
-cd frontend && npm test   # Playwright a11y smoke suite (test/a11y/*.spec.js)
+cd backend && npm test          # node:test, *.test.js colocated with the source
+cd frontend && npm run test:unit # node:test over the DOM-free src/lib modules
+cd frontend && npm test         # Playwright a11y smoke suite (test/a11y/*.spec.js)
 ```
 
-The frontend suite needs a browser once per clone: `cd frontend && npm run test:install`. It is a
-deliberately small rendered-page regression net — focus-ring visibility and the `aria-disabled` +
-`aria-describedby` convention — not a component-unit-testing setup. See CLAUDE.md → *Commands* for
-what it covers and why it's shaped that way.
+The frontend's two suites are separate commands on purpose. `test:unit` is plain `node --test` over
+`src/lib/*.test.js` — no browser, no dependencies — covering the pure predicates, including the
+client half of rules the backend also enforces. `npm test` remains the Playwright suite and needs a
+browser once per clone (`cd frontend && npm run test:install`); it is a deliberately small
+rendered-page regression net — focus-ring visibility and the `aria-disabled` + `aria-describedby`
+convention — not a component-unit-testing setup. See CLAUDE.md → *Testing & tooling* for what each
+covers and why they're shaped that way.
 
 ## Code Style Guidelines
 
