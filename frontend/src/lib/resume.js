@@ -1,3 +1,5 @@
+import { readJson, writeJson } from './storage'
+
 // Resume positions for the media player (0XC-462) — every rule, DOM-free, so
 // PlayerContext stays the only place that touches a media element.
 //
@@ -64,27 +66,24 @@ function storageKey(email) {
   return `${KEY_PREFIX}${hash.toString(36)}`
 }
 
-// Every storage access is guarded: localStorage throws in private mode and on a
-// full quota, and resume must never be able to break playback.
+// Every storage access is guarded by `lib/storage.js`: localStorage throws in
+// private mode and on a full quota, and resume must never be able to break
+// playback. An unavailable or full store leaves resume simply inert.
+//
+// The object check stays here rather than in `storage.js`: it is this module's
+// knowledge of what it stored, and it is what makes corrupt stored JSON inert
+// (a stray `5` or `null` reads as an empty map) rather than throwing on the
+// first property access.
 //
 // Re-reading before every write is deliberate, not redundant I/O — it merges
 // with whatever another tab has written since, which a cached map would clobber.
 function readMap(email) {
-  try {
-    const raw = localStorage.getItem(storageKey(email))
-    const parsed = raw ? JSON.parse(raw) : null
-    return parsed && typeof parsed === 'object' ? parsed : {}
-  } catch {
-    return {}
-  }
+  const parsed = readJson(localStorage, storageKey(email))
+  return parsed && typeof parsed === 'object' ? parsed : {}
 }
 
 function writeMap(email, map) {
-  try {
-    localStorage.setItem(storageKey(email), JSON.stringify(map))
-  } catch {
-    // unavailable or full — resume is simply inert, playback is unaffected
-  }
+  writeJson(localStorage, storageKey(email), map)
 }
 
 // Keep the `MAX_ENTRIES` most recently updated entries, dropping malformed ones
