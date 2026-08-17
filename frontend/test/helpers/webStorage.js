@@ -1,13 +1,19 @@
 // In-memory `Storage` stand-ins for the frontend unit suite (0XC-463).
 //
-// `lib/resume.js` reaches for the `localStorage` *global* rather than taking a
-// storage object as an argument, so a unit test has to put one there. Node 22
-// ships no `localStorage` at all without `--experimental-webstorage` — the
-// property is absent from `globalThis`, not merely undefined — so installing one
-// is a plain define, and `removeLocalStorage()` deletes it again rather than
-// assigning `undefined`, which keeps the genuinely-absent state reachable. That
-// state is worth testing on its own: it is what an SSR render or any non-browser
-// import sees, and `resume.js`'s bare `catch` is what makes it inert.
+// `lib/resume.js` and `lib/media.js`'s start-params helpers reach for the
+// `localStorage` / `sessionStorage` *globals* rather than taking a storage
+// object as an argument, so a unit test has to put one there. Node 22 ships
+// neither without `--experimental-webstorage` — the properties are absent from
+// `globalThis`, not merely undefined — so installing one is a plain define, and
+// `removeStorage()` deletes it again rather than assigning `undefined`, which
+// keeps the genuinely-absent state reachable. That state is worth testing on its
+// own: it is what an SSR render or any non-browser import sees, and the bare
+// `catch` in each module is what makes it inert.
+//
+// `installStorage` takes the global's name rather than shipping a
+// localStorage/sessionStorage pair of near-identical wrappers — the two differ
+// only in which global they write, and a duplicated wrapper here would be the
+// same shape 0XC-464 exists to collapse one directory over.
 //
 // Lives under `test/helpers/` rather than beside the source for the same reason
 // `backend/test/helpers/spawnServer.js` does: the tests sit next to the modules
@@ -39,9 +45,9 @@ export function createStorage(initial = {}) {
 }
 
 // Every operation throws, reproducing Safari private mode and a full quota —
-// the two states `resume.js`'s try/catch exists for. `length` and `key` throw
-// too, so a future reader that reaches for either is covered by the same case
-// rather than passing because the double happened to be lenient there.
+// the two states the modules' try/catch blocks exist for. `length` and `key`
+// throw too, so a future reader that reaches for either is covered by the same
+// case rather than passing because the double happened to be lenient there.
 export function createFailingStorage(message = 'QuotaExceededError') {
   const fail = () => {
     throw new Error(message)
@@ -58,8 +64,9 @@ export function createFailingStorage(message = 'QuotaExceededError') {
   }
 }
 
-export function installLocalStorage(storage) {
-  Object.defineProperty(globalThis, 'localStorage', {
+// `name` is 'localStorage' or 'sessionStorage'.
+export function installStorage(name, storage) {
+  Object.defineProperty(globalThis, name, {
     value: storage,
     configurable: true,
     writable: true,
@@ -67,6 +74,6 @@ export function installLocalStorage(storage) {
   return storage
 }
 
-export function removeLocalStorage() {
-  delete globalThis.localStorage
+export function removeStorage(name) {
+  delete globalThis[name]
 }

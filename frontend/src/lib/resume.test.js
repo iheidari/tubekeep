@@ -3,8 +3,8 @@ import { afterEach, beforeEach, describe, it } from 'node:test'
 import {
   createFailingStorage,
   createStorage,
-  installLocalStorage,
-  removeLocalStorage,
+  installStorage,
+  removeStorage,
 } from '../../test/helpers/webStorage.js'
 import { clearPosition, positionToSeek, savePosition } from './resume.js'
 
@@ -30,11 +30,11 @@ const FRESH = { duration: DURATION, currentTime: 0 }
 let storage
 
 beforeEach(() => {
-  storage = installLocalStorage(createStorage())
+  storage = installStorage('localStorage', createStorage())
 })
 
 afterEach(() => {
-  removeLocalStorage()
+  removeStorage('localStorage')
 })
 
 // resume.js hashes the identity into its storage key. Write one entry through
@@ -219,7 +219,7 @@ describe('corrupt or hostile stored JSON', () => {
 
 describe('storage that throws (private mode, full quota)', () => {
   beforeEach(() => {
-    installLocalStorage(createFailingStorage())
+    installStorage('localStorage', createFailingStorage())
   })
 
   it('leaves every function inert rather than breaking playback', () => {
@@ -231,7 +231,7 @@ describe('storage that throws (private mode, full quota)', () => {
 
 describe('no localStorage at all', () => {
   beforeEach(() => {
-    removeLocalStorage()
+    removeStorage('localStorage')
   })
 
   // What an SSR render or any non-browser import sees. The bare `catch` swallows

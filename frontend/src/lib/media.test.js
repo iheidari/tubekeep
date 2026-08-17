@@ -1,12 +1,24 @@
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it } from 'node:test'
 import {
+  createFailingStorage,
+  createStorage,
+  installStorage,
+  removeStorage,
+} from '../../test/helpers/webStorage.js'
+import {
+  clearStartParams,
   downloadBlockReason,
+  fileUrl,
+  formatDuration,
   formatFileSize,
   hasQuotaFor,
   hasRoomFor,
+  isAudioFile,
   isUnlimitedQuota,
+  loadStartParams,
   mediaKind,
+  saveStartParams,
   sharesSource,
 } from './media.js'
 
@@ -228,5 +240,117 @@ describe('formatFileSize', () => {
     const huge = formatFileSize(1024 ** 7)
     assert.ok(huge.endsWith(' PB'), `expected a PB-suffixed size, got ${huge}`)
     assert.ok(!huge.includes('undefined'))
+  })
+})
+
+describe('isAudioFile', () => {
+  it('matches the known audio extensions, case-insensitively', () => {
+    for (const name of ['a.mp3', 'a.M4A', 'a.ogg', 'a.opus', 'a.wav', 'a.FLAC']) {
+      assert.equal(isAudioFile(name), true, name)
+    }
+  })
+
+  it('is false for video and for nothing at all', () => {
+    assert.equal(isAudioFile('clip.mp4'), false)
+    assert.equal(isAudioFile(''), false)
+    assert.equal(isAudioFile(undefined), false)
+  })
+})
+
+describe('formatDuration', () => {
+  it('formats mm:ss with a zero-padded seconds field', () => {
+    assert.equal(formatDuration(0), '0:00')
+    assert.equal(formatDuration(65), '1:05')
+    assert.equal(formatDuration(3600), '60:00')
+  })
+
+  it('floors a fractional second rather than rounding up past 59', () => {
+    assert.equal(formatDuration(65.9), '1:05')
+    assert.equal(formatDuration(59.9), '0:59')
+  })
+
+  it('returns the fallback for a non-finite or negative value', () => {
+    assert.equal(formatDuration(undefined), '')
+    assert.equal(formatDuration(Number.NaN), '')
+    assert.equal(formatDuration(-1), '')
+    assert.equal(formatDuration(-1, '--:--'), '--:--')
+  })
+})
+
+describe('fileUrl', () => {
+  it('encodes the filename', () => {
+    // Filenames come from yt-dlp and routinely carry spaces, ampersands and
+    // unicode; the serve route reads them back RFC 5987-encoded.
+    assert.equal(fileUrl('https://h', 'id1', 'a b&c.mp4'), 'https://h/api/files/id1/a%20b%26c.mp4')
+    assert.equal(fileUrl('https://h', 'id1', 'café.mp3'), 'https://h/api/files/id1/caf%C3%A9.mp3')
+  })
+
+  it('adds the attachment flag only when asked', () => {
+    assert.equal(fileUrl('https://h', 'id1', 'v.mp4'), 'https://h/api/files/id1/v.mp4')
+    assert.equal(
+      fileUrl('https://h', 'id1', 'v.mp4', { download: true }),
+      'https://h/api/files/id1/v.mp4?action=download',
+    )
+  })
+})
+
+describe('download start params (sessionStorage)', () => {
+  // Per-tab persistence so a reload of /download/:id can resume the SSE instead
+  // of losing router state. Pinned here because 0XC-464 will collapse this
+  // module's hand-rolled try/catch wrapper into a shared `lib/storage.js`, and
+  // that refactor is meant to land against tests holding the degradation
+  // behaviour rather than against inspection alone.
+  const ID = 'abc-123'
+  const PARAMS = { url: 'https://youtu.be/abc', formatId: '137', type: 'video' }
+  let store
+
+  beforeEach(() => {
+    store = installStorage('sessionStorage', createStorage())
+  })
+
+  afterEach(() => {
+    removeStorage('sessionStorage')
+  })
+
+  it('round-trips the params for a download', () => {
+    saveStartParams(ID, PARAMS)
+    assert.deepEqual(loadStartParams(ID), PARAMS)
+  })
+
+  it('namespaces them by downloadId', () => {
+    saveStartParams(ID, PARAMS)
+    assert.equal(loadStartParams('a-different-id'), null)
+    assert.equal(store.length, 1)
+  })
+
+  it('reads an absent key as null', () => {
+    assert.equal(loadStartParams(ID), null)
+  })
+
+  it('reads corrupt JSON as null rather than throwing', () => {
+    saveStartParams(ID, PARAMS)
+    store.setItem(store.key(0), '{ not json')
+    assert.equal(loadStartParams(ID), null)
+  })
+
+  it('clears them', () => {
+    saveStartParams(ID, PARAMS)
+    clearStartParams(ID)
+    assert.equal(loadStartParams(ID), null)
+    assert.equal(store.length, 0)
+  })
+
+  it('stays inert when sessionStorage throws', () => {
+    installStorage('sessionStorage', createFailingStorage())
+    assert.doesNotThrow(() => saveStartParams(ID, PARAMS))
+    assert.doesNotThrow(() => clearStartParams(ID))
+    assert.equal(loadStartParams(ID), null)
+  })
+
+  it('stays inert when sessionStorage is absent', () => {
+    removeStorage('sessionStorage')
+    assert.doesNotThrow(() => saveStartParams(ID, PARAMS))
+    assert.doesNotThrow(() => clearStartParams(ID))
+    assert.equal(loadStartParams(ID), null)
   })
 })
