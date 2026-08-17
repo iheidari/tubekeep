@@ -3,8 +3,15 @@
 // Single source of truth for the API origin: explicit env, else same-origin
 // (works in single-server mode). Lives here (not in React context) so any lib
 // module can import it; the history context re-exports it as HISTORY_API_URL.
+//
+// `import.meta.env?.` — the optional chain is load-bearing, not defensive noise
+// (0XC-463). Vite defines `import.meta.env` and statically replaces this
+// expression at build time, but plain Node ESM leaves it `undefined`, so a
+// direct `.VITE_API_URL` throws a TypeError the moment this module is imported.
+// That is evaluated at module scope, so it would take down the whole unit suite
+// — every pure predicate below is untestable without it. Don't "tidy" it away.
 export const API_URL =
-  import.meta.env.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin : '')
+  import.meta.env?.VITE_API_URL || (typeof window !== 'undefined' ? window.location.origin : '')
 
 // Window event the API layer broadcasts when a protected call returns 401 (the
 // magic-link session is missing/expired). The AuthProvider listens for it to

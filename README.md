@@ -59,6 +59,7 @@ tubekeep/
 - **Material Symbols** (Google Fonts) - Icon library, rendered as ligature text in a `<span class="material-symbols-outlined">`
 - **Tailwind CSS via the runtime CDN** - Styling, with the whole Material Design 3 design-token theme declared inline in `frontend/index.html`. There is no Tailwind dependency, `tailwind.config.js`, or PostCSS in this repo — see CLAUDE.md → *Styling system — non-obvious* before changing a token.
 - **Playwright** - The a11y smoke suite (`frontend/test/a11y/`)
+- **`node --test`** - The frontend unit suite over the DOM-free `frontend/src/lib` modules, with no test-framework dependency at all
 
 ## Features
 
@@ -398,11 +399,12 @@ npm run build  # Creates dist/ folder
 ### Tests
 ```bash
 cd backend  && npm test         # node:test unit + integration suite
+cd frontend && npm run test:unit     # node:test over the DOM-free src/lib modules
 cd frontend && npm test         # Playwright a11y smoke suite (rendered pages)
 cd frontend && npm run test:install  # one-time: fetch the browser
 ```
 
-Both suites are hermetic — no network, database, or `yt-dlp` needed — and both run on every PR
+All three suites are hermetic — no network, database, or `yt-dlp` needed — and all run on every PR
 (`.github/workflows/ci.yml`). The frontend suite is a small rendered-page regression net for the
 things lint and `vite build` structurally can't see: focus-ring visibility (a CSS specificity
 conflict once shipped it invisible on every text input) and the `aria-disabled` +
