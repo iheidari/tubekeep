@@ -100,6 +100,30 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+  # Mirror of ci.yml's `frontend-unit` (0XC-463) — restated here for the same
+  # reason as the jobs above: deploy.yml also fires on the weekly rebuild and on
+  # manual dispatch, neither of which goes through a PR.
+  frontend-unit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run frontend unit suite
+        working-directory: frontend
+        run: npm run test:unit
+
   # Mirror of ci.yml's `frontend-a11y` — deploy.yml also fires on the daily cron
   # and on manual dispatch, neither of which goes through a PR, so the checks
   # have to be restated here rather than inherited.
@@ -143,7 +167,7 @@ jobs:
           retention-days: 7
 
   build:
-    needs: [lint, test, build-frontend, frontend-a11y]
+    needs: [lint, test, build-frontend, frontend-unit, frontend-a11y]
     runs-on: ubuntu-latest
     permissions:
       contents: read
