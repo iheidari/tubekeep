@@ -10,6 +10,7 @@
 //     never in a URL.
 
 import { API_URL, apiFetch } from './media'
+import { readJson, removeKey, sessionStore, writeJson } from './storage.js'
 
 // Per-provider static metadata. The OAuth client id + redirect URI are resolved
 // at runtime from the backend's /api/cloud/providers (which publishes them
@@ -124,29 +125,18 @@ async function getProviderConfig(name) {
 
 const tokenKey = (name) => `tk_cloud_${name}`
 
+// null when absent, malformed, or the store is unavailable — the caller then
+// treats the provider as not connected and re-runs the consent flow.
 function loadToken(name) {
-  try {
-    const raw = sessionStorage.getItem(tokenKey(name))
-    return raw ? JSON.parse(raw) : null
-  } catch {
-    return null
-  }
+  return readJson(sessionStore(), tokenKey(name))
 }
 
 function saveToken(name, token) {
-  try {
-    sessionStorage.setItem(tokenKey(name), JSON.stringify(token))
-  } catch {
-    // ignore unavailable sessionStorage
-  }
+  writeJson(sessionStore(), tokenKey(name), token)
 }
 
 export function disconnect(name) {
-  try {
-    sessionStorage.removeItem(tokenKey(name))
-  } catch {
-    // ignore
-  }
+  removeKey(sessionStore(), tokenKey(name))
 }
 
 // --- connect (popup) ------------------------------------------------------

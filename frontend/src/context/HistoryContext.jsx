@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiFetch, fetchDownloads, fileUrl, sharesSource } from '../lib/media'
+import { localStore, removeKey } from '../lib/storage'
 import { HISTORY_API_URL, HistoryContext, LEGACY_HISTORY_KEYS } from './historyContext.js'
 import { useAuth } from './useAuth.js'
 
@@ -54,11 +55,7 @@ async function forgetOnServer(downloadId) {
 // visitor doesn't carry a dead copy of someone's list around forever.
 function clearLegacyStorage() {
   for (const key of LEGACY_HISTORY_KEYS) {
-    try {
-      localStorage.removeItem(key)
-    } catch {
-      // ignore unavailable localStorage
-    }
+    removeKey(localStore(), key)
   }
 }
 
