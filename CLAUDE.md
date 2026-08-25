@@ -28,9 +28,12 @@ npm run check                  # biome check --write .  (apply safe lint fixes +
 ## Testing & tooling
 
 ```bash
-cd backend  && npm test    # node --require ./testSetup.js --test  (node:test, *.test.js beside the source)
-cd frontend && npm test    # Playwright a11y smoke suite (npm run test:install on a fresh clone)
+cd backend  && npm test           # node --require ./testSetup.js --test  (node:test, *.test.js beside the source)
+cd frontend && npm run test:unit  # node --test over the DOM-free src/lib modules (no browser, no deps)
+cd frontend && npm test           # Playwright a11y smoke suite (npm run test:install on a fresh clone)
 ```
+
+**The frontend has two suites and `npm test` is still only the a11y one, deliberately (0XC-463).** The unit runner is a separate `test:unit` script rather than folded into `test`, so CI's `frontend-a11y` job keeps its meaning and a fresh clone can run the unit suite without downloading a browser. Both are gates — `frontend-unit` and `frontend-a11y` in `ci.yml`, mirrored in `deploy.yml`. `test:unit` is plain `node --test` over `src/lib/*.test.js`: no Vitest, no jsdom, no bundler and no dependencies, because those modules are pure and DOM-free by design. It is the only gate covering the **client** half of rules the backend also enforces (`sharesSource` against `SUPERSEDABLE_SQL`; `hasRoomFor`/`hasQuotaFor` against `utils/storage.js`).
 
 **IMPORTANT: before creating or modifying any `*.test.js`, `*.spec.js`, test helper, or GitHub Actions workflow — or diagnosing a failing/flaky run — load the `tubekeep-testing` skill.** It carries the rules whose violation fails in a way that points nowhere near the cause: the `testSetup.js` stdout guard, the `spawnServer.js` helper (never hand-pick a `PORT`), the two store contract suites and their per-store escape hatches, the hermetic a11y fixtures, and what CI runs.
 

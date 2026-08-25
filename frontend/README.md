@@ -12,10 +12,14 @@ Run from this directory:
 | `npm run dev` | Vite dev server on port 5173, proxying `/api` to the backend on port 3001 |
 | `npm run build` | Production build to `dist/` |
 | `npm run lint` | Biome (lint + format diagnostics), using the repo-root `biome.json` |
+| `npm run test:unit` | `node --test` over the DOM-free `src/lib` modules (`src/lib/*.test.js`) |
 | `npm test` | Playwright accessibility smoke suite (`test/a11y/`) |
 
-The Playwright suite needs a browser on a fresh clone — run `npm run test:install`
-once before the first `npm test`.
+There are two suites and they are deliberately separate commands. `test:unit` needs
+nothing at all — no browser, no dependencies, no bundler — because the modules it
+covers are pure and DOM-free; the `localStorage` doubles it uses live in
+`test/helpers/webStorage.js`. `npm test` stays the Playwright suite, which needs a
+browser on a fresh clone — run `npm run test:install` once before the first `npm test`.
 
 `npm run preview` serves the built `dist/` on port 4173 with the same API proxy, and
 `npm run test:ui` opens the Playwright UI.

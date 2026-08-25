@@ -10,6 +10,7 @@
     "format": "biome format --write .",
     "preview": "vite preview",
     "test": "playwright test",
+    "test:unit": "node --test 'src/lib/*.test.js'",
     "test:ui": "playwright test --ui",
     "test:install": "playwright install --with-deps chromium"
   },
