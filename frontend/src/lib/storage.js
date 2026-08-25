@@ -20,6 +20,42 @@
 // makes corrupt stored JSON inert rather than throwing.
 
 /**
+ * The `localStorage` / `sessionStorage` object, or `null` when it cannot be
+ * reached. Callers pass `localStore()`, never the bare global.
+ *
+ * Resolving the global *here* rather than at the call site is load-bearing.
+ * `localStorage` is a bare identifier, so reading it throws `ReferenceError`
+ * wherever the global does not exist — an SSR render, any non-browser import,
+ * the unit suite — and some private modes throw on the property access itself.
+ * The four hand-rolled wrappers this module replaced dereferenced the global
+ * *inside* their own `try`, so both cases were swallowed. Passing the store in
+ * as an argument evaluates it at the call site, outside the guards below, which
+ * resurrects exactly the crash they exist to prevent (0XC-464). Going through
+ * `globalThis` keeps the read a property access rather than an identifier
+ * lookup, and the `try` covers the private modes that throw on it anyway.
+ *
+ * A `null` store needs no special case downstream: `null.getItem` is a
+ * `TypeError` raised inside each helper's own `try`, so it degrades down the
+ * same path as a store whose methods throw.
+ */
+export function localStore() {
+  try {
+    return globalThis.localStorage ?? null
+  } catch {
+    return null
+  }
+}
+
+/** The `sessionStorage` object, or `null` — see `localStore`. */
+export function sessionStore() {
+  try {
+    return globalThis.sessionStorage ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Parsed JSON at `key`, or `fallback` when it is absent, unreadable or not
  * valid JSON. An empty stored string reads as absent, matching `getItem`'s own
  * "nothing useful here" — and matching every wrapper this replaced.

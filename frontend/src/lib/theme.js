@@ -1,4 +1,4 @@
-import { writeText } from './storage'
+import { localStore, writeText } from './storage.js'
 
 // Dark/light theme, persisted in localStorage and applied as a class on <html>.
 // The initial class is set by the no-FOUC inline script in index.html; this
@@ -20,7 +20,7 @@ export function applyTheme(theme) {
   root.classList.toggle('dark', dark)
   root.classList.toggle('light', !dark)
   // storage may be unavailable (private mode) — the class still applies
-  writeText(localStorage, STORAGE_KEY, theme)
+  writeText(localStore(), STORAGE_KEY, theme)
 }
 
 export function toggleTheme() {

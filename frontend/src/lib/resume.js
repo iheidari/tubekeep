@@ -1,4 +1,4 @@
-import { readJson, writeJson } from './storage'
+import { localStore, readJson, writeJson } from './storage.js'
 
 // Resume positions for the media player (0XC-462) — every rule, DOM-free, so
 // PlayerContext stays the only place that touches a media element.
@@ -78,12 +78,12 @@ function storageKey(email) {
 // Re-reading before every write is deliberate, not redundant I/O — it merges
 // with whatever another tab has written since, which a cached map would clobber.
 function readMap(email) {
-  const parsed = readJson(localStorage, storageKey(email))
+  const parsed = readJson(localStore(), storageKey(email))
   return parsed && typeof parsed === 'object' ? parsed : {}
 }
 
 function writeMap(email, map) {
-  writeJson(localStorage, storageKey(email), map)
+  writeJson(localStore(), storageKey(email), map)
 }
 
 // Keep the `MAX_ENTRIES` most recently updated entries, dropping malformed ones

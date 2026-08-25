@@ -1,6 +1,6 @@
 // Shared media helpers used across pages/components.
 
-import { readJson, removeKey, writeJson } from './storage'
+import { readJson, removeKey, sessionStore, writeJson } from './storage.js'
 
 // Single source of truth for the API origin: explicit env, else same-origin
 // (works in single-server mode). Lives here (not in React context) so any lib
@@ -176,15 +176,15 @@ export function fileUrl(apiUrl, downloadId, filename, { download = false } = {})
 const startKey = (downloadId) => `tk_start_${downloadId}`
 
 export function saveStartParams(downloadId, params) {
-  writeJson(sessionStorage, startKey(downloadId), params)
+  writeJson(sessionStore(), startKey(downloadId), params)
 }
 
 // null when absent, malformed, or the store is unavailable — the caller falls
 // back to re-deriving the params from the route.
 export function loadStartParams(downloadId) {
-  return readJson(sessionStorage, startKey(downloadId))
+  return readJson(sessionStore(), startKey(downloadId))
 }
 
 export function clearStartParams(downloadId) {
-  removeKey(sessionStorage, startKey(downloadId))
+  removeKey(sessionStore(), startKey(downloadId))
 }
